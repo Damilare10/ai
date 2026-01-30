@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Smart Reply Agent</title>
+    <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #000000;
+            --text-primary: #ffffff;
+            --text-secondary: #a1a1aa;
+            --accent-color: #3b82f6;
+            --accent-hover: #2563eb;
+            --glass-bg: rgba(20, 20, 20, 0.4);
+            --glass-border: rgba(255, 255, 255, 0.08);
+            --error-color: #ef4444;
+            --success-color: #10b981;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Outfit', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            background-image:
+                radial-gradient(circle at 15% 50%, rgba(59, 130, 246, 0.08), transparent 25%),
+                radial-gradient(circle at 85% 30%, rgba(139, 92, 246, 0.08), transparent 25%);
+            color: var(--text-primary);
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .auth-container {
+            background: var(--glass-bg);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 3rem 2.5rem;
+            width: 100%;
+            max-width: 420px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        .logo {
+            text-align: center;
+            margin-bottom: 2.5rem;
+        }
+
+        .logo h1 {
+            background: linear-gradient(to right, #fff, #94a3b8);
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-size: 2rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            letter-spacing: -0.5px;
+        }
+
+        .logo p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        h2 {
+            text-align: center;
+            margin-bottom: 2rem;
+            font-size: 1.5rem;
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        .password-wrapper {
+            position: relative;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px 16px;
+            border-radius: 10px;
+            border: 1px solid var(--glass-border);
+            background: rgba(0, 0, 0, 0.3);
+            color: var(--text-primary);
+            font-size: 0.95rem;
+            box-sizing: border-box;
+            transition: all 0.2s;
+        }
+
+        input[type="password"],
+        input[type="text"].password-input {
+            padding-right: 48px;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: var(--accent-color);
+            background: rgba(0, 0, 0, 0.5);
+        }
+
+        .password-toggle {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 4px 8px;
+            width: auto;
+            font-size: 1.2rem;
+            transition: color 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0;
+        }
+
+        .password-toggle:hover {
+            color: var(--text-primary);
+            transform: translateY(-50%);
+            box-shadow: none;
+            background: none;
+        }
+
+        button[type="submit"] {
+            width: 100%;
+            padding: 12px 24px;
+            background: white;
+            color: #000000;
+            border: none;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 0.5rem;
+        }
+
+        button[type="submit"]:hover {
+            background: #f0f0f0;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(255, 255, 255, 0.3);
+        }
+
+        button[type="submit"]:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .toggle-auth {
+            text-align: center;
+            margin-top: 1.5rem;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+        }
+
+        .toggle-auth a {
+            color: var(--accent-color);
+            text-decoration: none;
+            cursor: pointer;
+            font-weight: 500;
+            transition: color 0.2s;
+        }
+
+        .toggle-auth a:hover {
+            color: var(--accent-hover);
+        }
+
+        .error-message {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            color: var(--error-color);
+            padding: 12px 16px;
+            border-radius: 10px;
+            text-align: center;
+            margin-bottom: 1.5rem;
+            font-size: 0.9rem;
+            display: none;
+        }
+
+        .success-message {
+            background: rgba(16, 185, 129, 0.1);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+            color: var(--success-color);
+            padding: 12px 16px;
+            border-radius: 10px;
+            text-align: center;
+            margin-bottom: 1.5rem;
+            font-size: 0.9rem;
+            display: none;
+        }
+
+        @media (max-width: 480px) {
+            .auth-container {
+                padding: 2rem 1.5rem;
+            }
+
+            .logo h1 {
+                font-size: 1.75rem;
+            }
+
+            h2 {
+                font-size: 1.25rem;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="auth-container">
+        <div class="logo">
+            <h1>Smart Reply</h1>
+            <p>Your intelligent Twitter assistant</p>
+        </div>
+
+        <h2 id="auth-title">Welcome Back</h2>
+
+        <div id="error-msg" class="error-message"></div>
+        <div id="success-msg" class="success-message"></div>
+
+        <form id="auth-form">
+            <div class="form-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" required autocomplete="username">
+            </div>
+            <div class="form-group">
+                <label for="password">Password</label>
+                <div class="password-wrapper">
+                    <input type="password" id="password" name="password" required autocomplete="current-password">
+                    <button type="button" class="password-toggle" id="toggle-password">
+                        <span id="eye-icon">👁️</span>
+                    </button>
+                </div>
+            </div>
+            <div class="form-group" id="confirm-password-group" style="display: none;">
+                <label for="confirm-password">Confirm Password</label>
+                <div class="password-wrapper">
+                    <input type="password" id="confirm-password" name="confirm-password" autocomplete="new-password">
+                </div>
+            </div>
+            <button type="submit" id="submit-btn">Login</button>
+        </form>
+
+        <div class="toggle-auth">
+            <span id="toggle-text">Don't have an account?</span>
+            <a id="toggle-btn">Sign up</a>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('auth-form');
+        const title = document.getElementById('auth-title');
+        const submitBtn = document.getElementById('submit-btn');
+        const toggleBtn = document.getElementById('toggle-btn');
+        const toggleText = document.getElementById('toggle-text');
+        const errorMsg = document.getElementById('error-msg');
+        const successMsg = document.getElementById('success-msg');
+        const passwordInput = document.getElementById('password');
+        const togglePasswordBtn = document.getElementById('toggle-password');
+        const eyeIcon = document.getElementById('eye-icon');
+        const confirmGroup = document.getElementById('confirm-password-group');
+        const confirmInput = document.getElementById('confirm-password');
+
+        let isLogin = true;
+
+        // Password visibility toggle
+        togglePasswordBtn.addEventListener('click', () => {
+            const type = passwordInput.getAttribute('type') === 'password' ? 'text' : 'password';
+            passwordInput.setAttribute('type', type);
+            eyeIcon.textContent = type === 'password' ? '👁️' : '🙈';
+        });
+
+        toggleBtn.addEventListener('click', () => {
+            isLogin = !isLogin;
+            title.textContent = isLogin ? 'Welcome Back' : 'Create Account';
+            submitBtn.textContent = isLogin ? 'Login' : 'Sign Up';
+            toggleText.textContent = isLogin ? "Don't have an account?" : "Already have an account?";
+            toggleBtn.textContent = isLogin ? 'Sign up' : 'Login';
+            errorMsg.style.display = 'none';
+            successMsg.style.display = 'none';
+
+            // Toggle confirm password
+            confirmGroup.style.display = isLogin ? 'none' : 'block';
+            confirmInput.required = !isLogin;
+            if (isLogin) confirmInput.value = '';
+        });
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const username = form.username.value;
+            const password = form.password.value;
+
+            if (!isLogin) {
+                const confirmPassword = confirmInput.value;
+                if (password !== confirmPassword) {
+                    errorMsg.textContent = "Passwords do not match!";
+                    errorMsg.style.display = 'block';
+                    return;
+                }
+            }
+
+            errorMsg.style.display = 'none';
+            successMsg.style.display = 'none';
+
+            submitBtn.disabled = true;
+            submitBtn.textContent = isLogin ? 'Logging in...' : 'Signing up...';
+
+            try {
+                const endpoint = isLogin ? '/api/auth/login' : '/api/auth/signup';
+
+                let body;
+                let headers = {};
+
+                if (isLogin) {
+                    body = new URLSearchParams();
+                    body.append('username', username);
+                    body.append('password', password);
+                    headers['Content-Type'] = 'application/x-www-form-urlencoded';
+                } else {
+                    body = JSON.stringify({ username, password });
+                    headers['Content-Type'] = 'application/json';
+                }
+
+                const res = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: headers,
+                    body: body
+                });
+
+                const data = await res.json();
+
+                if (!res.ok) {
+                    throw new Error(data.detail || 'Authentication failed');
+                }
+
+                localStorage.setItem('token', data.access_token);
+
+                successMsg.textContent = isLogin ? 'Login successful! Redirecting...' : 'Account created! Redirecting...';
+                successMsg.style.display = 'block';
+
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 1000);
+
+            } catch (err) {
+                errorMsg.textContent = err.message;
+                errorMsg.style.display = 'block';
+                submitBtn.disabled = false;
+                submitBtn.textContent = isLogin ? 'Login' : 'Sign Up';
+            }
+        });
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Reply Dashboard</title>
+    <link rel="stylesheet" href="dashboard.css?v=4">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0f172a">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Smart Reply">
+    <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo">
+                <h2>Smart Reply</h2>
+            </div>
+            <nav>
+                <a href="#" class="nav-item active" data-view="dashboard-view">
+                    <span>📊</span> Dashboard
+                </a>
+                <a href="#" class="nav-item" data-view="history-view">
+                    <span>🕒</span> History
+                </a>
+                <a href="#" class="nav-item" data-view="settings-view">
+                    <span>⚙️</span> Settings
+                </a>
+                <a href="#" id="installAppBtn" class="nav-item" style="display: none;">
+                    <span>⬇️</span> Install App
+                </a>
+            </nav>
+
+            <a href="https://t.me/telemtsa" target="_blank"
+                style="text-decoration: none; color: inherit; margin-top: auto;">
+                <div id="userWidget"
+                    style="padding: 16px; background: rgba(255,255,255,0.03); border-radius: 12px; border: 1px solid rgba(255,255,255,0.08);">
+                    <div style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 4px;">Signed in as</div>
+                    <div id="sidebarUsername"
+                        style="font-weight: 600; color: white; display: flex; align-items: center; gap: 8px;">
+                        <span>...</span>
+                    </div>
+                </div>
+            </a>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <div class="top-bar">
+                <div style="display: flex; align-items: center;">
+                    <button id="sidebarToggle" class="icon-btn"
+                        style="background: none; border: none; cursor: pointer; font-size: 1.5rem; color: #fff; padding: 8px; margin-right: 1rem;">☰</button>
+                    <h1 id="pageTitle">Dashboard</h1>
+                </div>
+                <div class="status-indicator online">System Online</div>
+            </div>
+
+            <!-- Dashboard View -->
+            <div id="dashboard-view" class="view-section">
+                <!-- Stats Row -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <h3>Replies Today</h3>
+                        <p class="stat-value" id="todayCount">0</p>
+                    </div>
+                    <div class="stat-card">
+                        <h3>Success Rate</h3>
+                        <p class="stat-value">--</p>
+                    </div>
+                    <div class="stat-card chart-card">
+                        <canvas id="activityChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="content-grid">
+                    <!-- Left Column: Input & Console -->
+                    <div class="left-col">
+                        <div class="glass-panel input-panel">
+                            <h2>Batch Input</h2>
+                            <p class="subtitle">Paste multiple Tweet URLs (one per line)</p>
+                            <textarea id="urlInput"
+                                placeholder="https://x.com/user/status/123...&#10;https://x.com/user/status/456..."></textarea>
+                            <div class="action-row">
+                                <select id="toneSelect">
+                                    <option value="professional">Professional</option>
+                                    <option value="casual">Casual</option>
+                                    <option value="witty">Witty</option>
+                                    <option value="friendly">Friendly</option>
+                                </select>
+                                <button id="startBatchBtn" class="primary-btn">Start Processing</button>
+                                <button id="stopBatchBtn" class="primary-btn"
+                                    style="background-color: var(--error); color: white; display: none;">Stop</button>
+                            </div>
+                        </div>
+
+                        <div class="glass-panel console-panel">
+                            <div class="panel-header">
+                                <h2>System Console</h2>
+                                <button id="clearConsole" class="icon-btn">🗑️</button>
+                            </div>
+                            <div id="consoleLog" class="console-log">
+                                <div class="log-entry info">System initialized...</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right Column: Review Queue -->
+                    <div class="right-col">
+                        <div class="glass-panel review-panel">
+                            <h2>Review Queue <span id="queueCount" class="badge">0</span></h2>
+                            <div id="reviewList" class="review-list">
+                                <!-- Review items will be injected here -->
+                                <div class="empty-state">No replies pending review</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- History View -->
+            <div id="history-view" class="view-section" style="display: none;">
+                <div class="glass-panel">
+                    <div class="panel-header">
+                        <h2>Reply History</h2>
+                        <button id="refreshHistory" class="icon-btn">🔄</button>
+                    </div>
+                    <div id="historyList" class="review-list">
+                        <div class="empty-state">Loading history...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings View -->
+            <div id="settings-view" class="view-section" style="display: none;">
+                <div class="glass-panel">
+                    <div class="panel-header">
+                        <h2>Settings</h2>
+                        <button id="toggleCredentials" class="icon-btn" title="Toggle Visibility">👁️</button>
+                    </div>
+
+                    <div class="settings-section">
+                        <h3>Posting Account Credentials</h3>
+                        <p class="subtitle">Used for posting replies on your behalf</p>
+                        <div class="form-group">
+                            <label>API Key</label>
+                            <input type="text" id="postApiKey" placeholder="API Key">
+                        </div>
+                        <div class="form-group">
+                            <label>API Secret</label>
+                            <input type="password" id="postApiSecret" placeholder="API Secret">
+                        </div>
+                        <div class="form-group">
+                            <label>Access Token</label>
+                            <input type="text" id="postAccessToken" placeholder="Access Token">
+                        </div>
+                        <div class="form-group">
+                            <label>Access Secret</label>
+                            <input type="password" id="postAccessSecret" placeholder="Access Secret">
+                        </div>
+                    </div>
+
+
+
+                    <div class="settings-section" style="margin-top: 2rem;">
+                        <div
+                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                            <div>
+                                <h3>Scraping Accounts (Twitter API v2)</h3>
+                                <p class="subtitle">Used for reading tweets (Round Robin)</p>
+                            </div>
+                            <button id="addScrapingAccountBtn" class="btn-sm btn-secondary">+ Add Account</button>
+                        </div>
+                        <div id="scrapingAccountsList">
+                            <!-- Scraping accounts injected here -->
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 2rem; padding-top: 1.5rem;">
+                        <button id="saveSettingsBtn" class="primary-btn" style="width: 100%; margin-bottom: 1rem;">Save
+                            Settings</button>
+                    </div>
+
+                    <div style="margin-top: 1rem; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1.5rem;">
+                        <button id="settingsLogoutBtn" class="primary-btn"
+                            style="background-color: #ef4444; width: 100%;">Logout</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+        </main>
+        <div class="watermark">
+            Made by <a href="https://t.me/Web3kaijun" target="_blank">Kaiju</a>
+        </div>
+    </div>
+
+    <!-- Intent Modal -->
+    <div id="intentModal" class="modal">
+        <div class="modal-content glass-panel">
+            <span class="modal-close">&times;</span>
+            <h3 style="margin-top: 0; color: #3b82f6;">🐦 Twitter Opened</h3>
+            <div style="margin: 1rem 0;">
+                <p style="color: #94a3b8; margin: 0.5rem 0;"><strong>Tweet ID:</strong> <span id="modalTweetId"></span>
+                </p>
+                <p style="color: #94a3b8; margin: 0.5rem 0;"><strong>Your Reply:</strong></p>
+                <p id="modalComment"
+                    style="background: rgba(59, 130, 246, 0.1); padding: 0.75rem; border-radius: 8px; color: #e2e8f0; margin: 0.5rem 0;">
+                </p>
+            </div>
+            <p style="color: #94a3b8; font-size: 0.9rem; margin: 1rem 0;">Twitter has been
+                opened in a
+                new tab.
+                After
+                you post your reply, click confirm below to mark it as done.</p>
+            <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1.5rem;">
+                <button id="modalCancel" class="btn-sm btn-secondary">Cancel</button>
+                <button id="modalConfirm" class="btn-sm" style="background: #10b981;">✅ Confirm Posted</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="dashboard.js?v=7"></script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(registration => {
+                        console.log('ServiceWorker registration successful');
+                    })
+                    .catch(err => {
+                        console.log('ServiceWorker registration failed: ', err);
+                    });
+            });
+        }
+    </script>
+</body>
+
+</html>
