@@ -474,6 +474,17 @@ def save_settings_to_db(settings: Dict, user_id: int):
 def get_scraping_credentials(user_id: Optional[int] = None) -> List[Dict]:
     creds_pool = []
     
+    # 1. ALWAYS load System Credentials (from .env via config.py)
+    for i in range(len(config.API_KEYS)):
+        creds_pool.append({
+            "api_key": config.API_KEYS[i],
+            "api_secret": config.API_SECRETS[i],
+            "access_token": config.ACCESS_TOKENS[i],
+            "access_secret": config.ACCESS_SECRETS[i],
+            "bearer_token": config.BEARER_TOKENS[i]
+        })
+
+    # 2. If user_id provided, APPEND their personal scraping credentials from DB
     if user_id:
         try:
             with get_db_connection() as conn:
@@ -492,17 +503,6 @@ def get_scraping_credentials(user_id: Optional[int] = None) -> List[Dict]:
                         except: pass
         except Exception as e:
             logger.error(f"Error reading credentials: {e}")
-            
-        return creds_pool
-
-    for i in range(len(config.API_KEYS)):
-        creds_pool.append({
-            "api_key": config.API_KEYS[i],
-            "api_secret": config.API_SECRETS[i],
-            "access_token": config.ACCESS_TOKENS[i],
-            "access_secret": config.ACCESS_SECRETS[i],
-            "bearer_token": config.BEARER_TOKENS[i]
-        })
             
     return creds_pool
 
