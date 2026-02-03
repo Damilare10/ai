@@ -3,6 +3,7 @@ import tweepy
 import config
 import time
 import utils
+import random
 
 logger = logging.getLogger(__name__)
 
