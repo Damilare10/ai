@@ -650,6 +650,12 @@ document.addEventListener('DOMContentLoaded', () => {
         btn.textContent = 'Posting...';
         const tweetText = itemElement.dataset.tweetText || null;
 
+        // FIX: Add to ignore list immediately
+        const queueId = itemElement.dataset.queueId ? parseInt(itemElement.dataset.queueId) : null;
+        if (queueId && typeof locallyDeletedIds !== 'undefined') {
+            locallyDeletedIds.add(queueId);
+        }
+
         try {
             const response = await fetchWithAuth('/api/post', {
                 method: 'POST',
@@ -686,6 +692,13 @@ document.addEventListener('DOMContentLoaded', () => {
             log(`Failed to post to ${tweetId}: ${error.message} `, 'error');
             btn.disabled = false;
             btn.textContent = 'Post Reply';
+
+            // Revert ignore list if failed
+            // We need to access queueId here, but it's defined in the upper scope now
+            const queueId = itemElement.dataset.queueId ? parseInt(itemElement.dataset.queueId) : null;
+            if (queueId && typeof locallyDeletedIds !== 'undefined') {
+                locallyDeletedIds.delete(queueId);
+            }
         }
     }
 
