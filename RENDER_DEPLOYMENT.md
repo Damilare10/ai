@@ -39,7 +39,7 @@ Ensure your latest code (including the recent changes to support environment var
 4.  **Region**: **Must be the same** as your database.
 5.  **Runtime**: **Python 3**
 6.  **Build Command**: `pip install -r requirements.txt`
-7.  **Start Command**: `uvicorn main:app --host 0.0.0.0 --port 10000`
+7.  **Start Command**: `uvicorn main:app --host 0.0.0.0 --port 8000`
 8.  **Environment Variables**:
     *   `DATABASE_URL`: Paste the **Internal Connection String** from Step 2.
     *   `SECRET_KEY`: Generate a random string (e.g., using `openssl rand -hex 32`).

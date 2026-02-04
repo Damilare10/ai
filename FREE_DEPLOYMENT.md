@@ -49,7 +49,7 @@ Make sure your code is committed and pushed to your GitHub repository.
     *   **Region**: Same as (or close to) your Neon DB region.
     *   **Runtime**: **Python 3**
     *   **Build Command**: `pip install -r requirements.txt`
-    *   **Start Command**: `uvicorn main:app --host 0.0.0.0 --port 10000`
+    *   **Start Command**: `uvicorn main:app --host 0.0.0.0 --port 8000`
     *   **Instance Type**: **Free**
 5.  **Environment Variables** (Click "Add Environment Variable"):
     *   `DATABASE_URL`: Paste the **Neon Connection String** from Step 1.

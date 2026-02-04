@@ -196,10 +196,26 @@ def init_db():
                 date DATE NOT NULL,
                 count INTEGER DEFAULT 0,
                 success_count INTEGER DEFAULT 0,
+                scraped_count INTEGER DEFAULT 0,
+                generated_count INTEGER DEFAULT 0,
                 UNIQUE(user_id, date),
                 FOREIGN KEY (user_id) REFERENCES users(id)
             )
         ''')
+        
+        # Migration: Add new stats columns if they don't exist
+        try:
+            c.execute("SELECT scraped_count FROM stats LIMIT 1")
+        except (sqlite3.OperationalError, psycopg2.Error if psycopg2 else Exception):
+            if pg_pool: conn.rollback()
+            logger.info("Migrating stats table: adding scraped_count and generated_count")
+            try:
+                c.execute("ALTER TABLE stats ADD COLUMN scraped_count INTEGER DEFAULT 0")
+                c.execute("ALTER TABLE stats ADD COLUMN generated_count INTEGER DEFAULT 0")
+                if pg_pool: conn.commit()
+            except Exception as e:
+                logger.error(f"Migration failed: {e}")
+                if pg_pool: conn.rollback()
 
         # Settings Table
         c.execute(f'''
@@ -357,6 +373,32 @@ def update_stats(success: bool, user_id: int):
                 (user_id, today)
             )
 
+def increment_scraped_count(user_id: int, amount: int = 1):
+    update_stats_metric("scraped_count", amount, user_id)
+
+def increment_generated_count(user_id: int, amount: int = 1):
+    update_stats_metric("generated_count", amount, user_id)
+
+def update_stats_metric(column: str, amount: int, user_id: int):
+    today = datetime.date.today()
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        ph = get_placeholder()
+        
+        # Ensure row exists
+        if get_db_type() == "postgres":
+            insert_sql = f"INSERT INTO stats (user_id, date, count, success_count, scraped_count, generated_count) VALUES ({ph}, {ph}, 0, 0, 0, 0) ON CONFLICT (user_id, date) DO NOTHING"
+        else:
+            insert_sql = f"INSERT OR IGNORE INTO stats (user_id, date, count, success_count, scraped_count, generated_count) VALUES ({ph}, {ph}, 0, 0, 0, 0)"
+            
+        c.execute(insert_sql, (user_id, today))
+        
+        # Update metric
+        c.execute(
+            f"UPDATE stats SET {column} = {column} + {ph} WHERE user_id = {ph} AND date = {ph}",
+            (amount, user_id, today)
+        )
+
 def get_stats(user_id: int) -> Dict:
     today = datetime.date.today()
     with get_db_connection() as conn:
@@ -368,7 +410,31 @@ def get_stats(user_id: int) -> Dict:
             if hasattr(row, 'keys'):
                 return dict(row)
             return dict(row)
-        return {"count": 0, "success_count": 0}
+        return {"count": 0, "success_count": 0, "scraped_count": 0, "generated_count": 0}
+
+def get_all_user_stats() -> List[Dict]:
+    """Admin: Get usage stats for all users."""
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        # Join users and stats to get usernames and aggregated totals
+        # Note: We sum up ALL time stats for the dashboard table
+        sql = """
+            SELECT 
+                u.username, 
+                COALESCE(SUM(s.scraped_count), 0) as total_scraped,
+                COALESCE(SUM(s.generated_count), 0) as total_generated,
+                COALESCE(SUM(s.success_count), 0) as total_posted
+            FROM users u
+            LEFT JOIN stats s ON u.id = s.user_id
+            GROUP BY u.username
+            ORDER BY total_posted DESC
+        """
+        c.execute(sql)
+        rows = c.fetchall()
+        results = []
+        for row in rows:
+            results.append(dict(row) if hasattr(row, 'keys') else dict(row))
+        return results
 
 def get_daily_stats(user_id: int, days: int = 7) -> List[Dict]:
     today = datetime.date.today()

@@ -721,6 +721,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     // Add a little user icon + the name
                     usernameEl.innerHTML = `👤 ${user.username} `;
                 }
+
+                // Admin Check
+                if (user.username === 'web3kaiju') {
+                    const statusLink = document.getElementById('adminStatusLink');
+                    if (statusLink) {
+                        statusLink.style.display = 'flex'; // Changed to flex to match nav items
+                        console.log("Admin Panel Activated");
+                    }
+                }
             }
         } catch (e) {
             console.error('Failed to load user info', e);
@@ -1042,6 +1051,42 @@ document.addEventListener('DOMContentLoaded', () => {
                 saveBtn.disabled = false;
             }, 2000);
         }
+    }
+
+    // --- ADMIN STATS LOGIC ---
+    async function loadAdminStats() {
+        try {
+            const res = await fetchWithAuth('/api/admin/stats');
+            if (!res.ok) return;
+
+            const stats = await res.json();
+            const tbody = document.getElementById('adminStatsBody');
+            if (!tbody) return;
+
+            tbody.innerHTML = ''; // Clear existing
+
+            stats.forEach(userStat => {
+                const tr = document.createElement('tr');
+                tr.style.borderBottom = '1px solid rgba(255,255,255,0.05)';
+
+                tr.innerHTML = `
+                    <td style="padding: 12px; font-weight: 500;">${userStat.username}</td>
+                    <td style="padding: 12px; color: #94a3b8;">${userStat.total_scraped || 0}</td>
+                    <td style="padding: 12px; color: #94a3b8;">${userStat.total_generated || 0}</td>
+                    <td style="padding: 12px; color: #10b981;">${userStat.total_posted || 0}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+        } catch (e) {
+            console.error("Error loading admin stats:", e);
+        }
+    }
+
+    // Bind refresh button
+    const refreshAdminStatsBtn = document.getElementById('refreshAdminStats');
+    if (refreshAdminStatsBtn) {
+        refreshAdminStatsBtn.addEventListener('click', loadAdminStats);
     }
 
     async function loadHistory() {

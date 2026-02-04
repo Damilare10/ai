@@ -285,6 +285,18 @@ async def get_stats(request: Request, current_user: dict = Depends(get_current_u
         logger.error(f"Error getting stats: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve stats")
 
+@app.get("/api/admin/stats")
+async def get_admin_stats(request: Request, current_user: dict = Depends(get_current_user)):
+    """Admin only: Get usage stats for all users."""
+    if current_user['username'] != 'web3kaiju':
+        raise HTTPException(status_code=403, detail="Admin access required")
+        
+    try:
+        return utils.get_all_user_stats()
+    except Exception as e:
+        logger.error(f"Error getting admin stats: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve admin stats")
+
 @app.get("/api/history")
 @limiter.limit("20/minute")
 async def get_history(request: Request, current_user: dict = Depends(get_current_user)):
@@ -382,6 +394,8 @@ async def scrape_tweet(request: Request, scrape_req: ScrapeRequest, current_user
             raise HTTPException(status_code=400, detail=text)
             
         utils.add_log(f"Successfully scraped {tweet_id}", user_id=current_user['id'])
+        # TRACKING: Increment scraped count
+        utils.increment_scraped_count(current_user['id'])
         return {"tweet_id": tweet_id, "text": text}
         
     except HTTPException:
@@ -509,6 +523,12 @@ async def generate_reply(request: Request, gen_req: GenerateRequest, current_use
                 asyncio.to_thread(ai_agent.generate_reply, gen_req.tweet_text, gen_req.tone, current_user['id']),
                 timeout=30.0
             )
+            
+            # TRACKING: Increment generated count
+            if "Error" not in reply:
+                utils.increment_generated_count(current_user['id'])
+                
+            return {"reply": reply}
         except asyncio.TimeoutError:
             error_msg = "Timeout while generating reply"
             logger.error(error_msg)
@@ -696,6 +716,10 @@ class BatchManager:
                         user_id=session.user_id, 
                         rotation_index=batch_index
                     )
+                    
+                    # TRACKING: Increment scraped count for batch
+                    if scraped_data:
+                        utils.increment_scraped_count(session.user_id, len(scraped_data))
                 else:
                     if not cached_tweets:
                          continue # Empty batch after filtering
@@ -731,6 +755,10 @@ class BatchManager:
                         tone=session.tone,
                         user_id=session.user_id
                     )
+                    
+                    # TRACKING: Increment generated count for batch
+                    if generated_replies:
+                        utils.increment_generated_count(session.user_id, len(generated_replies))
                     
                     # 5. Add to Queue
                     for item in generated_replies:

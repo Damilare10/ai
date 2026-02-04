@@ -37,6 +37,9 @@
                 <a href="#" class="nav-item" data-view="settings-view">
                     <span>⚙️</span> Settings
                 </a>
+                <a href="#" id="adminStatusLink" class="nav-item" data-view="admin-status-view" style="display: none;">
+                    <span>📈</span> Status
+                </a>
                 <a href="#" id="installAppBtn" class="nav-item" style="display: none;">
                     <span>⬇️</span> Install App
                 </a>
@@ -137,6 +140,31 @@
                     </div>
                     <div id="historyList" class="review-list">
                         <div class="empty-state">Loading history...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Admin Status View -->
+            <div id="admin-status-view" class="view-section" style="display: none;">
+                <div class="glass-panel">
+                    <div class="panel-header">
+                        <h2>System Usage Status</h2>
+                        <button id="refreshAdminStats" class="icon-btn">🔄</button>
+                    </div>
+                    <div class="table-container" style="overflow-x: auto; margin-top: 1rem;">
+                        <table id="adminStatsTable" style="width: 100%; border-collapse: collapse; color: #fff;">
+                            <thead>
+                                <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
+                                    <th style="text-align: left; padding: 12px;">User</th>
+                                    <th style="padding: 12px;">Tweets Scraped</th>
+                                    <th style="padding: 12px;">Replies Generated</th>
+                                    <th style="padding: 12px;">Replies Posted</th>
+                                </tr>
+                            </thead>
+                            <tbody id="adminStatsBody">
+                                <!-- Stats injected here -->
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
