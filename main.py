@@ -655,7 +655,9 @@ class BatchManager:
                 utils.add_log(f"📦 Starting Batch {batch_index + 1}/{len(chunks)} ({len(chunk_urls)} items)", user_id=session.user_id)
                 
                 # 1. Prepare IDs for this batch
-                batch_ids = []
+                batch_ids_to_scrape = [] # Only scrape these
+                cached_tweets = [] # Already found
+                
                 # Map tweet_id -> url (for logging errors)
                 id_to_url = {}
                 
@@ -667,38 +669,53 @@ class BatchManager:
                         if utils.has_user_processed(session.user_id, t_id):
                             utils.add_log(f"⏭️ Skipping {t_id}: You have already processed this.", "WARNING", user_id=session.user_id)
                             continue
-                        batch_ids.append(t_id)
+                            
+                        # Check Cache
+                        cached_text = utils.get_cached_tweet_content(t_id)
+                        if cached_text:
+                            utils.add_log(f"⚡ Found {t_id} in Shared Pool! Skipping scrape...", "INFO", user_id=session.user_id)
+                            cached_tweets.append({"id": t_id, "text": cached_text})
+                        else:
+                            batch_ids_to_scrape.append(t_id)
+
                         id_to_url[t_id] = url
                     except:
                         utils.add_log(f"Skipping invalid URL: {url}", "ERROR", user_id=session.user_id)
 
-                if not batch_ids:
-                    continue # Empty batch after filtering
-
-                # 2. Batch Scrape
-                # Rotation Index = batch_index (Ensures Batch 1 -> Key 1, Batch 2 -> Key 2)
-                utils.add_log(f"  > Batch Scraping {len(batch_ids)} tweets...", "INFO", user_id=session.user_id)
-                await asyncio.sleep(2) # Small safety delay
-                
-                # Current scraper.get_tweets_batch is synchronous, run in thread
-                scraped_data = await asyncio.to_thread(
-                    scraper.get_tweets_batch, 
-                    tweet_ids=batch_ids, 
-                    user_id=session.user_id, 
-                    rotation_index=batch_index
-                )
+                # 2. Batch Scrape (Only scrape what we don't have)
+                scraped_data = {}
+                if batch_ids_to_scrape:
+                    # Rotation Index = batch_index (Ensures Batch 1 -> Key 1, Batch 2 -> Key 2)
+                    utils.add_log(f"  > Batch Scraping {len(batch_ids_to_scrape)} tweets...", "INFO", user_id=session.user_id)
+                    await asyncio.sleep(2) # Small safety delay
+                    
+                    # Current scraper.get_tweets_batch is synchronous, run in thread
+                    scraped_data = await asyncio.to_thread(
+                        scraper.get_tweets_batch, 
+                        tweet_ids=batch_ids_to_scrape, 
+                        user_id=session.user_id, 
+                        rotation_index=batch_index
+                    )
+                else:
+                    if not cached_tweets:
+                         continue # Empty batch after filtering
                 
                 # 3. Check what we got
                 valid_tweets_for_ai = [] # List of dicts {'id': '...', 'text': '...'}
                 
-                for t_id in batch_ids:
-                    if t_id in scraped_data:
-                        text = scraped_data[t_id]
-                        # Cache it
-                        utils.cache_tweet_content(t_id, text)
-                        valid_tweets_for_ai.append({"id": t_id, "text": text})
-                    else:
-                        utils.add_log(f"  > Failed to scrape {t_id} (Deleted or Access Denied)", "ERROR", user_id=session.user_id)
+                # Add cached items
+                valid_tweets_for_ai.extend(cached_tweets)
+                
+                # Add scraped items
+                if batch_ids_to_scrape:
+                    for t_id in batch_ids_to_scrape:
+                        if t_id in scraped_data:
+                            text = scraped_data[t_id]
+                            # Cache it
+                            utils.cache_tweet_content(t_id, text)
+                            valid_tweets_for_ai.append({"id": t_id, "text": text})
+                        else:
+                            utils.add_log(f"  > Failed to scrape {t_id} (Deleted or Access Denied)", "ERROR", user_id=session.user_id)
 
                 if not valid_tweets_for_ai:
                     utils.add_log(f"  > No valid tweets obtained in this batch.", "WARNING", user_id=session.user_id)
