@@ -297,6 +297,10 @@
         togglePasswordBtn.addEventListener('click', () => {
             const type = passwordInput.getAttribute('type') === 'password' ? 'text' : 'password';
             passwordInput.setAttribute('type', type);
+            // Also toggle confirm password if it exists
+            if (confirmInput) {
+                confirmInput.setAttribute('type', type);
+            }
             eyeIcon.textContent = type === 'password' ? '👁️' : '🙈';
         });
 
