@@ -820,3 +820,7 @@ async def stop_batch(current_user: dict = Depends(get_current_user)):
     """Stop batch processing."""
     batch_manager.stop(current_user['id'])
     return {"status": "stopping"}
+
+# Serve Static Files (SPA Support)
+# This MUST be last to allow API routes to work first
+app.mount("/", StaticFiles(directory="static", html=True), name="static")
