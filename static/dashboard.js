@@ -604,7 +604,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Also try to remove any duplicates by ID (just in case)
             if (queueId) {
-                const dupe = document.querySelector(`.review - item[data - queue - id="${queueId}"]`);
+                const dupe = document.querySelector(`.review-item[data-queue-id="${queueId}"]`);
                 if (dupe) dupe.remove();
             }
 
@@ -625,7 +625,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (queueId) {
                 // Silently try to delete from queue DB
-                fetchWithAuth(`/ api / queue / ${queueId} `, { method: 'DELETE' }).catch(err => console.log("Queue delete skipped", err));
+                fetchWithAuth(`/api/queue/${queueId}`, { method: 'DELETE' }).catch(err => console.log("Queue delete skipped", err));
             }
 
             log(`Marked reply to ${tweetId} as done`, 'success');
@@ -678,7 +678,7 @@ document.addEventListener('DOMContentLoaded', () => {
             // Remove from queue if it has a queueId
             if (itemElement.dataset.queueId) {
                 try {
-                    await fetchWithAuth(`/ api / queue / ${itemElement.dataset.queueId} `, { method: 'DELETE' });
+                    await fetchWithAuth(`/api/queue/${itemElement.dataset.queueId}`, { method: 'DELETE' });
                 } catch (e) {
                     console.error('Failed to remove from queue', e);
                 }
