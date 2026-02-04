@@ -184,6 +184,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 loadSettings();
             } else if (targetId === 'history-view') {
                 loadHistory();
+            } else if (targetId === 'admin-status-view') {
+                if (typeof loadAdminStats === 'function') {
+                    loadAdminStats();
+                } else {
+                    console.error("loadAdminStats is not defined");
+                }
             }
         });
     });
@@ -723,7 +729,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
 
                 // Admin Check
-                if (user.username === 'web3kaiju') {
+                // Admin Check
+                console.log("Current user:", user.username);
+                if (user.username && user.username.toLowerCase() === 'web3kaiju') {
                     const statusLink = document.getElementById('adminStatusLink');
                     if (statusLink) {
                         statusLink.style.display = 'flex'; // Changed to flex to match nav items
