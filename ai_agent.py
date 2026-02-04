@@ -2,6 +2,8 @@ import os
 from groq import Groq
 import config
 import utils
+import json
+import re
 
 def generate_reply(tweet_text, tone="professional", user_id=None):
     """
@@ -24,7 +26,7 @@ def generate_reply(tweet_text, tone="professional", user_id=None):
         Instructions:
         1. **Persona:** Adopt a {tone} tone.
            - If "casual": Be chill, use lowercase if it fits, maybe slang like "tbh" or "ngl" if appropriate.
-           - If "pjrofessional": Be insightful, polite, and clear.
+           - If "professional": Be insightful, polite, and clear.
            - If "funny": Make a light joke or witty observation.
         2. **Substance:** Do NOT just say "Great project" or "Sounds good". 
            - Pick one specific detail from the tweet to comment on.
@@ -58,7 +60,6 @@ def generate_reply(tweet_text, tone="professional", user_id=None):
         reply = completion.choices[0].message.content.strip()
         
         # Safety: Strip any HTML tags if the AI ignores instructions
-        import re
         reply = re.sub(r'<[^>]+>', '', reply)  # Remove HTML tags
         reply = re.sub(r'\*\*.*?\*\*', '', reply)  # Remove markdown bold
         reply = re.sub(r'\*.*?\*', '', reply)  # Remove markdown italic
@@ -66,3 +67,71 @@ def generate_reply(tweet_text, tone="professional", user_id=None):
         return reply
     except Exception as e:
         return f"Error generating reply: {e}"
+
+def generate_batch_replies(tweets_data: list[dict], tone="professional", user_id=None) -> list[dict]:
+    """
+    Generates replies for a batch of tweets (up to 5).
+    Input: [{'id': '123', 'text': 'Hello'}, ...]
+    Output: [{'id': '123', 'reply': 'Hi there'}]
+    """
+    try:
+        api_key = config.GROQ_API_KEY
+        if not api_key:
+            return [{"id": t['id'], "reply": "Error: Groq Key Missing"} for t in tweets_data]
+            
+        client = Groq(api_key=api_key)
+        
+        # Construct Batch Prompt
+        tweets_json_str = json.dumps(tweets_data, indent=2)
+        
+        prompt = f"""
+        You are a Twitter user replying to {len(tweets_data)} different tweets.
+        Your goal is to be engaging, relevant, and sound like a real person.
+
+        **INPUT TWEETS (JSON):**
+        {tweets_json_str}
+
+        **INSTRUCTIONS:**
+        1. **Persona:** Adopt a {tone} tone.
+        2. **Output Format:** Return a STRICT JSON ARRAY of objects. Each object must have "id" (matching input) and "reply".
+           Example: [ {{"id": "123", "reply": "Cool stuff!"}}, ... ]
+        3. **Content:** Pick a specific detail to comment on. No generic "Nice tweet".
+        4. **Length:** Under 200 chars per reply.
+        5. **No Formatting:** Plain text only. No hashtags, no markdown.
+
+        **OUTPUT ONLY THE JSON ARRAY. NO MARKDOWN BLOCK. NO EXTRA TEXT.**
+        """
+
+        completion = client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=1,
+            max_completion_tokens=1500,
+            top_p=1,
+            stream=False,
+            stop=None,
+        )
+
+        response_text = completion.choices[0].message.content.strip()
+        
+        # Clean potential markdown wrapping ```json ... ```
+        if response_text.startswith("```"):
+            response_text = response_text.split("```")[1]
+            if response_text.startswith("json"):
+                response_text = response_text[4:]
+        
+        replies_data = json.loads(response_text)
+        
+        # Sanitize replies
+        for item in replies_data:
+            r = item.get("reply", "")
+            r = re.sub(r'<[^>]+>', '', r)
+            r = re.sub(r'\*\*.*?\*\*', '', r)
+            item["reply"] = r
+            
+        return replies_data
+
+    except Exception as e:
+        print(f"Batch generation error: {e}")
+        # Fallback: Error for all
+        return [{"id": t['id'], "reply": f"Error: {str(e)[:50]}"} for t in tweets_data]
