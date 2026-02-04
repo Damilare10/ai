@@ -150,6 +150,7 @@ app.add_middleware(
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE", "PUT", "PATCH"],
     allow_headers=["Content-Type", "Authorization"],
 )
 
@@ -275,17 +276,6 @@ async def get_stats(request: Request, current_user: dict = Depends(get_current_u
             stats['success_rate'] = 0
         
         # Get daily history for chart
-        # We need to fetch more data for the chart if not present in stats table
-        # But for now, let's just return what we have. 
-        # Wait, the frontend expects 'daily' array for the chart.
-        # utils.get_stats only returns today's single row.
-        # We need to fetch the last 7 days of stats.
-        
-        # Let's check utils.get_stats again. It only returns one row.
-        # The frontend code: const stats = data.daily;
-        # So the API needs to return { success_rate: ..., daily: [...] }
-        
-        # Let's fix the API to return the expected structure.
         daily_stats = utils.get_daily_stats(current_user['id'], days=7)
         return {
             "success_rate": stats['success_rate'],
@@ -647,115 +637,103 @@ class BatchManager:
             utils.add_log("Stopping batch process...", "WARNING", user_id=user_id)
 
     async def _process_batch(self, session: BatchSession):
+        """
+        Process URLs in batches of 5.
+        1. Batch Scrape (5 URLs -> 1 API Call)
+        2. Batch Generate (5 Texts -> 1 AI Call)
+        """
         try:
-            for i in range(session.current_index, session.total_urls):
-                if session.should_stop:
-                    break
+            total_urls = len(session.urls)
+            chunk_size = 5
+            
+            # chunk urls
+            chunks = [session.urls[i:i + chunk_size] for i in range(0, total_urls, chunk_size)]
+            
+            for batch_index, chunk_urls in enumerate(chunks):
+                if session.should_stop: break
                 
-                session.current_index = i
-                url = session.urls[i]
-                session.current_url = url
+                utils.add_log(f"📦 Starting Batch {batch_index + 1}/{len(chunks)} ({len(chunk_urls)} items)", user_id=session.user_id)
                 
-                utils.add_log(f"[{i + 1}/{session.total_urls}] Processing: {url}", user_id=session.user_id)
+                # 1. Prepare IDs for this batch
+                batch_ids = []
+                # Map tweet_id -> url (for logging errors)
+                id_to_url = {}
+                
+                # Pre-filter (History check)
+                for url in chunk_urls:
+                    try:
+                        t_id = utils.extract_tweet_id(url)
+                        # Check History
+                        if utils.has_user_processed(session.user_id, t_id):
+                            utils.add_log(f"⏭️ Skipping {t_id}: You have already processed this.", "WARNING", user_id=session.user_id)
+                            continue
+                        batch_ids.append(t_id)
+                        id_to_url[t_id] = url
+                    except:
+                        utils.add_log(f"Skipping invalid URL: {url}", "ERROR", user_id=session.user_id)
+
+                if not batch_ids:
+                    continue # Empty batch after filtering
+
+                # 2. Batch Scrape
+                # Rotation Index = batch_index (Ensures Batch 1 -> Key 1, Batch 2 -> Key 2)
+                utils.add_log(f"  > Batch Scraping {len(batch_ids)} tweets...", "INFO", user_id=session.user_id)
+                await asyncio.sleep(2) # Small safety delay
+                
+                # Current scraper.get_tweets_batch is synchronous, run in thread
+                scraped_data = await asyncio.to_thread(
+                    scraper.get_tweets_batch, 
+                    tweet_ids=batch_ids, 
+                    user_id=session.user_id, 
+                    rotation_index=batch_index
+                )
+                
+                # 3. Check what we got
+                valid_tweets_for_ai = [] # List of dicts {'id': '...', 'text': '...'}
+                
+                for t_id in batch_ids:
+                    if t_id in scraped_data:
+                        text = scraped_data[t_id]
+                        # Cache it
+                        utils.cache_tweet_content(t_id, text)
+                        valid_tweets_for_ai.append({"id": t_id, "text": text})
+                    else:
+                        utils.add_log(f"  > Failed to scrape {t_id} (Deleted or Access Denied)", "ERROR", user_id=session.user_id)
+
+                if not valid_tweets_for_ai:
+                    utils.add_log(f"  > No valid tweets obtained in this batch.", "WARNING", user_id=session.user_id)
+                    continue
+
+                # 4. Batch Generate
+                utils.add_log(f"  > Generating batch replies ({len(valid_tweets_for_ai)} items)...", "INFO", user_id=session.user_id)
                 
                 try:
-                    # 1. Extract ID
-                    tweet_id = utils.extract_tweet_id(url)
+                    generated_replies = await asyncio.to_thread(
+                        ai_agent.generate_batch_replies,
+                        tweets_data=valid_tweets_for_ai,
+                        tone=session.tone,
+                        user_id=session.user_id
+                    )
                     
-                    # --- CHECK 1: PERSONAL REDUNDANCY ---
-                    if utils.has_user_processed(session.user_id, tweet_id):
-                        utils.add_log(f"⏭️ Skipping {tweet_id}: You have already processed this.", "WARNING", user_id=session.user_id)
-                        continue # Skip to next URL
-
-                    # --- CHECK 2: SHARED POOL (CACHE) ---
-                    cached_text = utils.get_cached_tweet_content(tweet_id)
-                    text = ""
-                    
-                    if cached_text:
-                        utils.add_log(f"⚡ Found in Shared Pool! Skipping scrape API...", "INFO", user_id=session.user_id)
-                        text = cached_text
-                        await asyncio.sleep(0.5) 
-                    else:
-                        # Not in pool, we must scrape
-                        utils.add_log(f"  > Scraping (API Call)...", "INFO", user_id=session.user_id)
-                        await asyncio.sleep(2)
+                    # 5. Add to Queue
+                    for item in generated_replies:
+                        t_id = item.get("id")
+                        reply = item.get("reply")
                         
-                        try:
-                            text = await scrape_tweet_with_retry(tweet_id, user_id=session.user_id)
-                            
-                            # Rate Limit Checks
-                            if "accounts exhausted" in text or "rate limited" in text:
-                                 utils.add_log(f"⚠️ Rate limit reached. Pausing for 15 minutes...", "WARNING", user_id=session.user_id)
-                                 for countdown in range(900, 0, -1):
-                                     if session.should_stop: break
-                                     if countdown % 60 == 0 or countdown <= 10:
-                                         utils.add_log(f"⏳ Resuming in {countdown // 60}m {countdown % 60}s...", "WARNING", user_id=session.user_id)
-                                     await asyncio.sleep(1)
-                                 
-                                 if session.should_stop: break
-                                     
-                                 utils.add_log(f"✅ Resuming process... Retrying current URL.", "INFO", user_id=session.user_id)
-                                 try:
-                                     text = await scrape_tweet_with_retry(tweet_id, user_id=session.user_id)
-                                 except Exception as retry_e:
-                                     utils.add_log(f"  > Retry failed: {retry_e}", "ERROR", user_id=session.user_id)
-                                     continue
-
-                            # Save to Shared Pool
-                            if text and "Error" not in text:
-                                utils.cache_tweet_content(tweet_id, text)
-
-                        except Exception as e:
-                            # Exception Rate Limit Check
-                            err_str = str(e)
-                            if "accounts exhausted" in err_str or "rate limited" in err_str or "429" in err_str:
-                                utils.add_log(f"⚠️ Rate limit reached. Pausing for 15 minutes...", "WARNING", user_id=session.user_id)
-                                for countdown in range(900, 0, -1):
-                                    if session.should_stop: break
-                                    if countdown % 60 == 0 or countdown <= 10:
-                                        utils.add_log(f"⏳ Resuming in {countdown // 60}m {countdown % 60}s...", "WARNING", user_id=session.user_id)
-                                    await asyncio.sleep(1)
-                                
-                                if session.should_stop: break
-                                utils.add_log(f"✅ Resuming process... Retrying current URL.", "INFO", user_id=session.user_id)
-                                try:
-                                    text = await scrape_tweet_with_retry(tweet_id, user_id=session.user_id)
-                                    if text and "Error" not in text: utils.cache_tweet_content(tweet_id, text)
-                                except Exception as retry_e:
-                                    utils.add_log(f"  > Retry failed: {retry_e}", "ERROR", user_id=session.user_id)
-                                    continue
-                            else:
-                                utils.add_log(f"  > Scrape failed: {e}", "ERROR", user_id=session.user_id)
-                                continue
-
-                    if "Error" in text:
-                        utils.add_log(f"  > Scrape error: {text}", "ERROR", user_id=session.user_id)
-                        continue
-
-                    # 2. Generate
-                    utils.add_log(f"  > Generating reply...", "INFO", user_id=session.user_id)
-                    try:
-                        reply = await asyncio.wait_for(
-                            asyncio.to_thread(ai_agent.generate_reply, text, session.tone, session.user_id),
-                            timeout=30.0
-                        )
-                    except Exception as e:
-                        utils.add_log(f"  > Generation failed: {e}", "ERROR", user_id=session.user_id)
-                        continue
-
-                    if "Error" in reply:
-                        utils.add_log(f"  > Generation error: {reply}", "ERROR", user_id=session.user_id)
-                        continue
-
-                    # 3. Add to Queue
-                    utils.add_to_queue(tweet_id, text, reply, user_id=session.user_id)
-                    utils.add_log(f"  > Added to review queue", "SUCCESS", user_id=session.user_id)
-                    
+                        # Find original text for logging/queue
+                        original_text = next((t["text"] for t in valid_tweets_for_ai if t["id"] == t_id), "")
+                        
+                        if reply and "Error" not in reply:
+                            utils.add_to_queue(t_id, original_text, reply, user_id=session.user_id)
+                            utils.add_log(f"  ✅ Ready: {t_id}", "SUCCESS", user_id=session.user_id)
+                        else:
+                             utils.add_log(f"  > Generation error for {t_id}: {reply}", "ERROR", user_id=session.user_id)
+                             
                 except Exception as e:
-                    utils.add_log(f"Error processing {url}: {e}", "ERROR", user_id=session.user_id)
-                
-                # Wait a bit before next item
-                await asyncio.sleep(1)
+                    utils.add_log(f"Batch AI Generation Failed: {e}", "ERROR", user_id=session.user_id)
+
+                # Batch Cooldown
+                await asyncio.sleep(2)
 
             if session.should_stop:
                 utils.add_log("Batch processing stopped by user", "WARNING", user_id=session.user_id)
@@ -798,34 +776,3 @@ async def stop_batch(current_user: dict = Depends(get_current_user)):
     """Stop batch processing."""
     batch_manager.stop(current_user['id'])
     return {"status": "stopping"}
-
-@app.get("/api/batch/status")
-async def get_batch_status(current_user: dict = Depends(get_current_user)):
-    """Get current batch status."""
-    user_id = current_user['id']
-    if user_id in batch_manager.sessions:
-        session = batch_manager.sessions[user_id]
-        return {
-            "is_processing": session.is_processing,
-            "current_index": session.current_index,
-            "total_urls": session.total_urls,
-            "current_url": session.current_url
-        }
-        
-    return {
-        "is_processing": False,
-        "current_index": 0,
-        "total_urls": 0,
-        "current_url": ""
-    }
-
-@app.get("/api/logs")
-async def get_logs(limit: int = 50, current_user: dict = Depends(get_current_user)):
-    """Get recent logs."""
-    return utils.get_recent_logs(limit, user_id=current_user['id'])
-
-# Mount static files (Frontend)
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
-
-if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
