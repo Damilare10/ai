@@ -305,7 +305,8 @@ def add_credits(username: str, amount: int) -> bool:
         c = conn.cursor()
         ph = get_placeholder()
         # Check if user exists first to be safe, or just update
-        c.execute(f"UPDATE users SET credits = credits + {amount} WHERE username = {ph}", (username,))
+        # Use LOWER() for case-insensitive matching
+        c.execute(f"UPDATE users SET credits = credits + {amount} WHERE LOWER(username) = LOWER({ph})", (username,))
         return c.rowcount > 0
 
 def add_log(message: str, level: str = "INFO", user_id: Optional[int] = None):

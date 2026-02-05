@@ -816,7 +816,7 @@ class BatchManager:
 @app.get("/api/admin/stats")
 async def get_admin_stats(current_user: dict = Depends(get_current_user)):
     """Get stats for all users (Admin only)."""
-    if current_user['username'] != 'web3kaiju':
+    if current_user['username'].lower() != 'web3kaiju':
         raise HTTPException(status_code=403, detail="Admin access required")
     
     stats = utils.get_all_user_stats()
@@ -829,7 +829,7 @@ class AddCreditsRequest(BaseModel):
 @app.post("/api/admin/credits")
 async def add_user_credits(req: AddCreditsRequest, current_user: dict = Depends(get_current_user)):
     """Add credits to a user (Admin only)."""
-    if current_user['username'] != 'web3kaiju':
+    if current_user['username'].lower() != 'web3kaiju':
         raise HTTPException(status_code=403, detail="Admin access required")
     
     success = utils.add_credits(req.username, req.amount)
