@@ -276,6 +276,26 @@
         </div>
     </div>
 
+    <!-- Credit Confirmation Modal -->
+    <div id="creditModal" class="modal">
+        <div class="modal-content glass-panel" style="max-width: 400px;">
+            <span class="modal-close" id="creditModalClose">&times;</span>
+            <h3 style="margin-top: 0; color: #10b981;">💰 Confirm Add Credits</h3>
+            <div style="margin: 1.5rem 0; text-align: center;">
+                <p style="color: #cbd5e1; margin-bottom: 0.5rem;">Add credits to:</p>
+                <h2 id="modalCreditUser" style="margin: 0; color: #fff;"></h2>
+                <div style="font-size: 2rem; margin: 1rem 0; color: #10b981; font-weight: bold;">
+                    +<span id="modalCreditAmount"></span>
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1.5rem;">
+                <button id="creditModalCancel" class="btn-sm btn-secondary">Cancel</button>
+                <button id="creditModalConfirm" class="btn-sm" style="background: #10b981;">Confirm & Add</button>
+            </div>
+        </div>
+    </div>
+
     <div id="toastContainer" class="toast-container"></div>
     <script src="dashboard.js?v=13"></script>
     <script>

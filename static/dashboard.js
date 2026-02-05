@@ -1122,47 +1122,82 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 3000);
     }
 
-    // Bind Add Credits Button
+    // Bind Add Credits Button (Opens Modal)
     const addCreditsBtn = document.getElementById('addCreditsBtn');
-    console.log("DEBUG: Searching for addCreditsBtn...", addCreditsBtn);
-    if (addCreditsBtn) {
-        addCreditsBtn.addEventListener('click', async () => {
-            console.log("DEBUG: Add Credits Clicked");
-            const usernameInput = document.getElementById('creditUsername');
-            const amountInput = document.getElementById('creditAmount');
-            const username = usernameInput.value;
-            const amount = parseInt(amountInput.value);
+    const creditModal = document.getElementById('creditModal');
+    const creditAmountDisp = document.getElementById('modalCreditAmount');
+    const creditUserDisp = document.getElementById('modalCreditUser');
+    const creditConfirmBtn = document.getElementById('creditModalConfirm');
+    const creditCancelBtn = document.getElementById('creditModalCancel');
+    const creditCloseBtn = document.getElementById('creditModalClose');
+
+    let pendingCreditRequest = null;
+
+    if (addCreditsBtn && creditModal) {
+        addCreditsBtn.addEventListener('click', () => {
+            const username = document.getElementById('creditUsername').value;
+            const amount = document.getElementById('creditAmount').value;
 
             if (!username || !amount) {
                 showToast('Please enter username and amount', 'error');
                 return;
             }
 
-            addCreditsBtn.disabled = true;
-            addCreditsBtn.textContent = 'Adding...';
+            // Populate Modal
+            creditUserDisp.textContent = username;
+            creditAmountDisp.textContent = amount;
+            pendingCreditRequest = { username, amount: parseInt(amount) };
+
+            // Show Modal
+            creditModal.style.display = 'block';
+        });
+
+        // Close Modal Logic
+        const closeCreditModal = () => {
+            creditModal.style.display = 'none';
+            pendingCreditRequest = null;
+        };
+
+        creditCloseBtn.onclick = closeCreditModal;
+        creditCancelBtn.onclick = closeCreditModal;
+        window.onclick = (event) => {
+            if (event.target == creditModal) closeCreditModal();
+        };
+
+        // Confirm Action
+        creditConfirmBtn.addEventListener('click', async () => {
+            if (!pendingCreditRequest) return;
+
+            creditConfirmBtn.disabled = true;
+            creditConfirmBtn.textContent = 'Adding...';
 
             try {
                 const res = await fetchWithAuth('/api/admin/credits', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, amount })
+                    body: JSON.stringify(pendingCreditRequest)
                 });
 
                 const data = await res.json();
                 if (res.ok) {
-                    showToast(data.message || 'Credits added successfully', 'success');
-                    loadAdminStats(); // Refresh table
-                    loadCurrentUser(); // Refresh header balance
-                    usernameInput.value = '';
-                    amountInput.value = '';
+                    showToast(`Successfully added ${pendingCreditRequest.amount} credits!`);
+                    // Refresh stats
+                    loadAdminStats();
+                    // Refresh own header if added to self
+                    loadCurrentUser();
+                    closeCreditModal();
+                    // Clear inputs
+                    document.getElementById('creditUsername').value = '';
+                    document.getElementById('creditAmount').value = '';
                 } else {
                     showToast(data.detail || 'Failed to add credits', 'error');
                 }
             } catch (e) {
-                showToast('Error connecting to server', 'error');
+                console.error(e);
+                showToast('Network error', 'error');
             } finally {
-                addCreditsBtn.disabled = false;
-                addCreditsBtn.textContent = 'Add';
+                creditConfirmBtn.disabled = false;
+                creditConfirmBtn.textContent = 'Confirm & Add';
             }
         });
     }
