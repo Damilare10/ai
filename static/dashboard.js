@@ -728,6 +728,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     usernameEl.innerHTML = `👤 ${user.username} `;
                 }
 
+                // Update Credits
+                const creditsEl = document.getElementById('creditsDisplay');
+                if (creditsEl) {
+                    creditsEl.textContent = `Credits: ${user.credits !== undefined ? user.credits : 0}`;
+                }
+
                 // Admin Check
                 // Admin Check
                 console.log("Current user:", user.username);
@@ -1079,6 +1085,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 tr.innerHTML = `
                     <td style="padding: 12px; font-weight: 500;">${userStat.username}</td>
+                    <td style="padding: 12px; color: #60a5fa;">${userStat.credits !== undefined ? userStat.credits : 0}</td>
                     <td style="padding: 12px; color: #94a3b8;">${userStat.total_scraped || 0}</td>
                     <td style="padding: 12px; color: #94a3b8;">${userStat.total_generated || 0}</td>
                     <td style="padding: 12px; color: #10b981;">${userStat.total_posted || 0}</td>
@@ -1092,9 +1099,50 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Bind refresh button
-    const refreshAdminStatsBtn = document.getElementById('refreshAdminStats');
     if (refreshAdminStatsBtn) {
         refreshAdminStatsBtn.addEventListener('click', loadAdminStats);
+    }
+
+    // Bind Add Credits Button
+    const addCreditsBtn = document.getElementById('addCreditsBtn');
+    if (addCreditsBtn) {
+        addCreditsBtn.addEventListener('click', async () => {
+            const usernameInput = document.getElementById('creditUsername');
+            const amountInput = document.getElementById('creditAmount');
+            const username = usernameInput.value;
+            const amount = parseInt(amountInput.value);
+
+            if (!username || !amount) {
+                log('Please enter username and amount', 'error');
+                return;
+            }
+
+            addCreditsBtn.disabled = true;
+            addCreditsBtn.textContent = 'Adding...';
+
+            try {
+                const res = await fetchWithAuth('/api/admin/credits', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, amount })
+                });
+
+                const data = await res.json();
+                if (res.ok) {
+                    log(data.message || 'Credits added', 'success');
+                    loadAdminStats(); // Refresh table
+                    usernameInput.value = '';
+                    amountInput.value = '';
+                } else {
+                    log(data.detail || 'Failed to add credits', 'error');
+                }
+            } catch (e) {
+                log('Error connecting to server', 'error');
+            } finally {
+                addCreditsBtn.disabled = false;
+                addCreditsBtn.textContent = 'Add';
+            }
+        });
     }
 
     async function loadHistory() {

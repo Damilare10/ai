@@ -66,7 +66,13 @@
                         style="background: none; border: none; cursor: pointer; font-size: 1.5rem; color: #fff; padding: 8px; margin-right: 1rem;">☰</button>
                     <h1 id="pageTitle">Dashboard</h1>
                 </div>
-                <div class="status-indicator online">System Online</div>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <div id="creditsDisplay" class="status-indicator"
+                        style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; border-color: rgba(59, 130, 246, 0.3);">
+                        Credits: --
+                    </div>
+                    <div class="status-indicator online">System Online</div>
+                </div>
             </div>
 
             <!-- Dashboard View -->
@@ -156,6 +162,7 @@
                             <thead>
                                 <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
                                     <th style="text-align: left; padding: 12px;">User</th>
+                                    <th style="padding: 12px;">Credits</th>
                                     <th style="padding: 12px;">Tweets Scraped</th>
                                     <th style="padding: 12px;">Replies Generated</th>
                                     <th style="padding: 12px;">Replies Posted</th>
@@ -165,6 +172,18 @@
                                 <!-- Stats injected here -->
                             </tbody>
                         </table>
+                    </div>
+
+                    <!-- Add Credits Form -->
+                    <div style="margin-top: 2rem; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1.5rem;">
+                        <h3>Add Credits</h3>
+                        <div style="display: flex; gap: 10px; margin-top: 1rem;">
+                            <input type="text" id="creditUsername" placeholder="Username"
+                                style="padding: 0.5rem; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); color: #fff; border-radius: 4px; flex: 1;">
+                            <input type="number" id="creditAmount" placeholder="Amount"
+                                style="padding: 0.5rem; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); color: #fff; border-radius: 4px; width: 100px;">
+                            <button id="addCreditsBtn" class="primary-btn">Add</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -257,7 +276,7 @@
         </div>
     </div>
 
-    <script src="dashboard.js?v=8"></script>
+    <script src="dashboard.js?v=10"></script>
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => {

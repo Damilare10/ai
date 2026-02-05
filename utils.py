@@ -140,9 +140,19 @@ def init_db():
                 id {primary_key},
                 username {text_type} UNIQUE NOT NULL,
                 password_hash {text_type} NOT NULL,
+                credits INTEGER DEFAULT 50,
                 created_at {timestamp_default}
             )
         ''')
+
+        # Migration: Add credits column if not exists
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN credits INTEGER DEFAULT 50")
+            conn.commit() # Commit schema change immediately
+            logger.info("Migrated: Added credits column to users table")
+        except Exception:
+            conn.rollback() # Important for Postgres: Rollback if error (e.g. column exists)
+
 
         # History Table
         c.execute(f'''
@@ -258,7 +268,45 @@ def create_user(username: str, password: str):
     with get_db_connection() as conn:
         c = conn.cursor()
         ph = get_placeholder()
-        c.execute(f"INSERT INTO users (username, password_hash) VALUES ({ph}, {ph})", (username, password_hash))
+        # Initial credits = 50
+        c.execute(f"INSERT INTO users (username, password_hash, credits) VALUES ({ph}, {ph}, 50)", (username, password_hash))
+
+def get_user_credits(user_id: int) -> int:
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        ph = get_placeholder()
+        c.execute(f"SELECT credits FROM users WHERE id = {ph}", (user_id,))
+        row = c.fetchone()
+        return row['credits'] if row else 0
+
+def deduct_credits(user_id: int, amount: int) -> bool:
+    """
+    Deduct credits from user. Returns True if successful, False if insufficient funds.
+    """
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        ph = get_placeholder()
+        
+        # Check balance first
+        c.execute(f"SELECT credits FROM users WHERE id = {ph}", (user_id,))
+        row = c.fetchone()
+        if not row or row['credits'] < amount:
+            return False
+            
+        # Deduct
+        c.execute(f"UPDATE users SET credits = credits - {amount} WHERE id = {ph}", (user_id,))
+        return True
+
+def add_credits(username: str, amount: int) -> bool:
+    """
+    Add credits to a user by username.
+    """
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        ph = get_placeholder()
+        # Check if user exists first to be safe, or just update
+        c.execute(f"UPDATE users SET credits = credits + {amount} WHERE username = {ph}", (username,))
+        return c.rowcount > 0
 
 def add_log(message: str, level: str = "INFO", user_id: Optional[int] = None):
     if level == "ERROR":
@@ -421,12 +469,13 @@ def get_all_user_stats() -> List[Dict]:
         sql = """
             SELECT 
                 u.username, 
+                u.credits,
                 COALESCE(SUM(s.scraped_count), 0) as total_scraped,
                 COALESCE(SUM(s.generated_count), 0) as total_generated,
                 COALESCE(SUM(s.success_count), 0) as total_posted
             FROM users u
             LEFT JOIN stats s ON u.id = s.user_id
-            GROUP BY u.username
+            GROUP BY u.username, u.credits
             ORDER BY total_posted DESC
         """
         c.execute(sql)

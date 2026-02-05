@@ -642,13 +642,19 @@ class BatchManager:
         if user_id in self.sessions and self.sessions[user_id].is_processing:
              raise HTTPException(status_code=400, detail="You already have a batch process running")
         
+        # Credit Check (Estimate)
+        credits = utils.get_user_credits(user_id)
+        cost_per_tweet = 4
+        if credits < cost_per_tweet:
+             raise HTTPException(status_code=402, detail=f"Insufficient credits. You need at least {cost_per_tweet} credits to start.")
+
         # Create new session
         session = BatchSession(user_id, urls, tone)
         self.sessions[user_id] = session
         
         # Start background task
         session.task = asyncio.create_task(self._process_batch(session))
-        utils.add_log(f"Started batch processing for {len(urls)} URLs", user_id=user_id)
+        utils.add_log(f"Started batch processing for {len(urls)} URLs. Credits: {credits}", user_id=user_id)
 
     def stop(self, user_id: int):
         if user_id in self.sessions and self.sessions[user_id].is_processing:
@@ -768,8 +774,15 @@ class BatchManager:
                         original_text = next((t["text"] for t in valid_tweets_for_ai if t["id"] == t_id), "")
                         
                         if reply and "Error" not in reply:
-                            utils.add_to_queue(t_id, original_text, reply, user_id=session.user_id)
-                            utils.add_log(f"  ✅ Ready: {t_id}", "SUCCESS", user_id=session.user_id)
+                            # DEDUCT CREDITS
+                            # Cost: 4 credits per successful reply
+                            if utils.deduct_credits(session.user_id, 4):
+                                utils.add_to_queue(t_id, original_text, reply, user_id=session.user_id)
+                                utils.add_log(f"  ✅ Ready: {t_id} (Credits -4)", "SUCCESS", user_id=session.user_id)
+                            else:
+                                utils.add_log(f"  ❌ Paused {t_id}: Insufficient credits to finalize.", "ERROR", user_id=session.user_id)
+                                session.should_stop = True # Stop the batch
+                                break # Exit loop
                         else:
                              utils.add_log(f"  > Generation error for {t_id}: {reply}", "ERROR", user_id=session.user_id)
                              
@@ -792,6 +805,34 @@ class BatchManager:
             session.task = None
             if session.user_id in self.sessions:
                 del self.sessions[session.user_id]
+
+# --- ADMIN ENDPOINTS ---
+
+@app.get("/api/admin/stats")
+async def get_admin_stats(current_user: dict = Depends(get_current_user)):
+    """Get stats for all users (Admin only)."""
+    if current_user['username'] != 'web3kaiju':
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    stats = utils.get_all_user_stats()
+    return stats
+
+class AddCreditsRequest(BaseModel):
+    username: str
+    amount: int
+
+@app.post("/api/admin/credits")
+async def add_user_credits(req: AddCreditsRequest, current_user: dict = Depends(get_current_user)):
+    """Add credits to a user (Admin only)."""
+    if current_user['username'] != 'web3kaiju':
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    success = utils.add_credits(req.username, req.amount)
+    if not success:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    utils.add_log(f"Admin added {req.amount} credits to {req.username}", "WARNING", user_id=current_user['id'])
+    return {"status": "success", "message": f"Added {req.amount} credits to {req.username}"}
 
 batch_manager = BatchManager()
 
