@@ -99,7 +99,11 @@ def get_db_connection():
             yield conn
             conn.commit()
     except Exception as e:
-        if conn: conn.rollback()
+        if conn:
+            try:
+                conn.rollback()
+            except Exception:
+                pass # Connection likely already closed
         raise e
     finally:
         if pg_pool and conn:
