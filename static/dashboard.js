@@ -1124,8 +1124,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Bind Add Credits Button
     const addCreditsBtn = document.getElementById('addCreditsBtn');
+    console.log("DEBUG: Searching for addCreditsBtn...", addCreditsBtn);
     if (addCreditsBtn) {
         addCreditsBtn.addEventListener('click', async () => {
+            console.log("DEBUG: Add Credits Clicked");
             const usernameInput = document.getElementById('creditUsername');
             const amountInput = document.getElementById('creditAmount');
             const username = usernameInput.value;
