@@ -205,7 +205,11 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
 
 @app.get("/api/auth/me", response_model=User)
 async def read_users_me(current_user: dict = Depends(get_current_user)):
-    return {"username": current_user["username"], "id": current_user["id"]}
+    return {
+        "username": current_user["username"], 
+        "id": current_user["id"],
+        "credits": current_user.get("credits", 0)
+    }
 
 # Data Models with Validation
 class ScrapeRequest(BaseModel):
