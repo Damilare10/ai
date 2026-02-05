@@ -96,6 +96,7 @@ class Token(BaseModel):
 class User(BaseModel):
     username: str
     id: Optional[int] = None
+    credits: int = 0
 
 class UserCreate(BaseModel):
     username: str
