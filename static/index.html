@@ -247,7 +247,7 @@
         </main>
         </main>
         <div class="watermark">
-            Made by <a href="https://t.me/Web3kaijun" target="_blank">Kaiju</a>
+            Made by <a href="https://t.me/Web3kaijun" target="_blank">Kaiju</a> (v13.5)
         </div>
     </div>
 
@@ -299,15 +299,13 @@
     <div id="toastContainer" class="toast-container"></div>
     <script src="dashboard.js?v=13"></script>
     <script>
+        // NUCLEAR OPTION: Unregister Service Worker to allow updates
         if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('./sw.js')
-                    .then(registration => {
-                        console.log('ServiceWorker registration successful');
-                    })
-                    .catch(err => {
-                        console.log('ServiceWorker registration failed: ', err);
-                    });
+            navigator.serviceWorker.getRegistrations().then(function (registrations) {
+                for (let registration of registrations) {
+                    registration.unregister();
+                    console.log('Service Worker Unregistered (Force Update)');
+                }
             });
         }
     </script>
