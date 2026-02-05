@@ -1103,6 +1103,25 @@ document.addEventListener('DOMContentLoaded', () => {
         refreshAdminStatsBtn.addEventListener('click', loadAdminStats);
     }
 
+    // Toast Helper
+    function showToast(message, type = 'success') {
+        const container = document.getElementById('toastContainer');
+        if (!container) return;
+
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.innerHTML = type === 'success' ? `✅ ${message}` : `❌ ${message}`;
+
+        container.appendChild(toast);
+
+        // Remove after 3 seconds
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateY(100%)';
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
+    }
+
     // Bind Add Credits Button
     const addCreditsBtn = document.getElementById('addCreditsBtn');
     if (addCreditsBtn) {
@@ -1113,7 +1132,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const amount = parseInt(amountInput.value);
 
             if (!username || !amount) {
-                log('Please enter username and amount', 'error');
+                showToast('Please enter username and amount', 'error');
                 return;
             }
 
@@ -1129,15 +1148,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 const data = await res.json();
                 if (res.ok) {
-                    log(data.message || 'Credits added', 'success');
+                    showToast(data.message || 'Credits added successfully', 'success');
                     loadAdminStats(); // Refresh table
+                    loadCurrentUser(); // Refresh header balance
                     usernameInput.value = '';
                     amountInput.value = '';
                 } else {
-                    log(data.detail || 'Failed to add credits', 'error');
+                    showToast(data.detail || 'Failed to add credits', 'error');
                 }
             } catch (e) {
-                log('Error connecting to server', 'error');
+                showToast('Error connecting to server', 'error');
             } finally {
                 addCreditsBtn.disabled = false;
                 addCreditsBtn.textContent = 'Add';

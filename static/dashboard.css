@@ -889,3 +889,40 @@ input[type="password"]:focus {
         justify-content: space-between;
     }
 }
+/* Toast Notification */
+.toast-container {
+    position: fixed;
+    bottom: 30px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10000;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    pointer-events: none;
+}
+
+.toast {
+    background: #0f172a;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #fff;
+    padding: 12px 24px;
+    border-radius: 30px;
+    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+    font-size: 0.95rem;
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    animation: toastSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+    pointer-events: auto;
+}
+
+.toast.success { border-color: rgba(16, 185, 129, 0.3); color: #10b981; background: rgba(16, 185, 129, 0.1); }
+.toast.error { border-color: rgba(239, 68, 68, 0.3); color: #ef4444; background: rgba(239, 68, 68, 0.1); }
+
+@keyframes toastSlideUp {
+    from { transform: translateY(100%); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
