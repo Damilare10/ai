@@ -1098,7 +1098,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+
     // Bind refresh button
+    const refreshAdminStatsBtn = document.getElementById('refreshAdminStats');
     if (refreshAdminStatsBtn) {
         refreshAdminStatsBtn.addEventListener('click', loadAdminStats);
     }
@@ -1149,7 +1151,7 @@ document.addEventListener('DOMContentLoaded', () => {
         pendingCreditRequest = { username, amount: parseInt(amount) };
 
         // Show Modal
-        creditModal.style.display = 'block';
+        creditModal.classList.add('active');
     };
 
     if (addCreditsBtn && creditModal) {
@@ -1157,7 +1159,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Close Modal Logic
         const closeCreditModal = () => {
-            creditModal.style.display = 'none';
+            creditModal.classList.remove('active');
             pendingCreditRequest = null;
         };
 

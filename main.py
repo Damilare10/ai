@@ -258,11 +258,13 @@ class PostRequest(BaseModel):
         if len(v) > 280:
             raise ValueError('Reply text exceeds 280 characters')
         return v
+
+@app.get("/api/logs")
 @limiter.limit("20/minute")
-async def get_logs(request: Request):
+async def get_logs(request: Request, current_user: dict = Depends(get_current_user)):
     """Get recent logs."""
     try:
-        return utils.get_recent_logs()
+        return utils.get_recent_logs(user_id=current_user['id'])
     except Exception as e:
         logger.error(f"Error getting logs: {e}")
         raise HTTPException(status_code=500, detail="Failed to retrieve logs")
@@ -866,6 +868,19 @@ async def stop_batch(current_user: dict = Depends(get_current_user)):
     """Stop batch processing."""
     batch_manager.stop(current_user['id'])
     return {"status": "stopping"}
+
+@app.get("/api/batch/status")
+async def get_batch_status(current_user: dict = Depends(get_current_user)):
+    """Get batch processing status for the current user."""
+    session = batch_manager.sessions.get(current_user['id'])
+    if session:
+        return {
+            "is_processing": session.is_processing,
+            "current_url": session.current_url,
+            "current_index": session.current_index,
+            "total_urls": session.total_urls
+        }
+    return {"is_processing": False}
 
 # Serve Static Files (SPA Support)
 # This MUST be last to allow API routes to work first
