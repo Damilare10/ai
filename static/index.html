@@ -182,7 +182,8 @@
                                 style="padding: 0.5rem; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); color: #fff; border-radius: 4px; flex: 1;">
                             <input type="number" id="creditAmount" placeholder="Amount"
                                 style="padding: 0.5rem; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.1); color: #fff; border-radius: 4px; width: 100px;">
-                            <button id="addCreditsBtn" class="primary-btn">Add</button>
+                            <button id="addCreditsBtn" class="primary-btn"
+                                onclick="window.handleAddCredits && window.handleAddCredits()">Add</button>
                         </div>
                     </div>
                 </div>
@@ -247,7 +248,7 @@
         </main>
         </main>
         <div class="watermark">
-            Made by <a href="https://t.me/Web3kaijun" target="_blank">Kaiju</a> (v13.5)
+            Made by <a href="https://t.me/Web3kaijun" target="_blank">Kaiju</a> (v14)
         </div>
     </div>
 
@@ -297,7 +298,7 @@
     </div>
 
     <div id="toastContainer" class="toast-container"></div>
-    <script src="dashboard.js?v=13"></script>
+    <script src="dashboard.js?v=14"></script>
     <script>
         // NUCLEAR OPTION: Unregister Service Worker to allow updates
         if ('serviceWorker' in navigator) {

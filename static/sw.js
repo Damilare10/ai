@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ai-reply-v7';
+const CACHE_NAME = 'ai-reply-v8';
 const ASSETS_TO_CACHE = [
     './',
     './index.html',

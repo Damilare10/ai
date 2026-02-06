@@ -1133,24 +1133,27 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let pendingCreditRequest = null;
 
+    // GLOBAL HANDLER for inline onclick fallback
+    window.handleAddCredits = function () {
+        const username = document.getElementById('creditUsername').value;
+        const amount = document.getElementById('creditAmount').value;
+
+        if (!username || !amount) {
+            showToast('Please enter username and amount', 'error');
+            return;
+        }
+
+        // Populate Modal
+        creditUserDisp.textContent = username;
+        creditAmountDisp.textContent = amount;
+        pendingCreditRequest = { username, amount: parseInt(amount) };
+
+        // Show Modal
+        creditModal.style.display = 'block';
+    };
+
     if (addCreditsBtn && creditModal) {
-        addCreditsBtn.addEventListener('click', () => {
-            const username = document.getElementById('creditUsername').value;
-            const amount = document.getElementById('creditAmount').value;
-
-            if (!username || !amount) {
-                showToast('Please enter username and amount', 'error');
-                return;
-            }
-
-            // Populate Modal
-            creditUserDisp.textContent = username;
-            creditAmountDisp.textContent = amount;
-            pendingCreditRequest = { username, amount: parseInt(amount) };
-
-            // Show Modal
-            creditModal.style.display = 'block';
-        });
+        addCreditsBtn.addEventListener('click', window.handleAddCredits);
 
         // Close Modal Logic
         const closeCreditModal = () => {
