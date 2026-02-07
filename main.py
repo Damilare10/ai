@@ -746,12 +746,17 @@ class BatchManager:
                                     user_id=session.user_id
                                 )
                                 
-                                # Wait in smaller increments to allow stop checks
-                                for _ in range(rate_limit_cooldown_seconds // 10):
+                                # Wait with minute-by-minute countdown pings
+                                for mins_remaining in range(cooldown_mins - 1, 0, -1):
                                     if session.should_stop:
                                         utils.add_log("Cooldown interrupted by user.", "WARNING", user_id=session.user_id)
                                         break
-                                    await asyncio.sleep(10)
+                                    await asyncio.sleep(60)  # Wait 1 minute
+                                    utils.add_log(f"⏳ Cooldown: {mins_remaining} minutes remaining...", "INFO", user_id=session.user_id)
+                                
+                                # Wait final minute
+                                if not session.should_stop:
+                                    await asyncio.sleep(60)
                                 
                                 if session.should_stop: break
                                 
