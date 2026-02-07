@@ -94,44 +94,82 @@ def generate_batch_replies(tweets_data: list[dict], tone="professional", user_id
         **INSTRUCTIONS:**
         1. **Persona:** Adopt a {tone} tone.
         2. **Output Format:** Return a STRICT JSON ARRAY of objects. Each object must have "id" (matching input) and "reply".
-           Example: [ {{"id": "123", "reply": "Cool stuff!"}}, ... ]
+           Example: [ {{"id": "123", "reply": "Cool stuff!"}}, {{"id": "456", "reply": "Nice one!"}} ]
         3. **Content:** Pick a specific detail to comment on. No generic "Nice tweet".
         4. **Length:** Under 200 chars per reply.
         5. **No Formatting:** Plain text only. No hashtags, no markdown.
+        6. **CRITICAL:** Ensure valid JSON - proper commas between objects, no trailing commas.
 
         **OUTPUT ONLY THE JSON ARRAY. NO MARKDOWN BLOCK. NO EXTRA TEXT.**
         """
 
-        completion = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=1,
-            max_completion_tokens=1500,
-            top_p=1,
-            stream=False,
-            stop=None,
-        )
+        max_retries = 2
+        last_error = None
+        
+        for attempt in range(max_retries):
+            try:
+                completion = client.chat.completions.create(
+                    model="llama-3.1-8b-instant",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.8 if attempt == 0 else 0.5,  # Lower temp on retry
+                    max_completion_tokens=1500,
+                    top_p=1,
+                    stream=False,
+                    stop=None,
+                )
 
-        response_text = completion.choices[0].message.content.strip()
+                response_text = completion.choices[0].message.content.strip()
+                
+                # Clean potential markdown wrapping ```json ... ```
+                if response_text.startswith("```"):
+                    response_text = response_text.split("```")[1]
+                    if response_text.startswith("json"):
+                        response_text = response_text[4:]
+                    response_text = response_text.strip()
+                
+                # Try to extract JSON array using regex (more robust)
+                json_match = re.search(r'\[[\s\S]*\]', response_text)
+                if json_match:
+                    response_text = json_match.group(0)
+                
+                # Attempt to fix common JSON issues
+                # Remove trailing commas before ] or }
+                response_text = re.sub(r',\s*]', ']', response_text)
+                response_text = re.sub(r',\s*}', '}', response_text)
+                
+                replies_data = json.loads(response_text)
+                
+                # Validate structure
+                if not isinstance(replies_data, list):
+                    raise ValueError("Response is not a list")
+                
+                # Sanitize replies
+                for item in replies_data:
+                    r = item.get("reply", "")
+                    r = re.sub(r'<[^>]+>', '', r)
+                    r = re.sub(r'\*\*.*?\*\*', '', r)
+                    item["reply"] = r
+                    
+                return replies_data
+                
+            except json.JSONDecodeError as e:
+                last_error = e
+                print(f"Batch JSON parse error (attempt {attempt + 1}): {e}")
+                continue  # Retry
+            except Exception as e:
+                last_error = e
+                print(f"Batch generation error (attempt {attempt + 1}): {e}")
+                continue  # Retry
         
-        # Clean potential markdown wrapping ```json ... ```
-        if response_text.startswith("```"):
-            response_text = response_text.split("```")[1]
-            if response_text.startswith("json"):
-                response_text = response_text[4:]
-        
-        replies_data = json.loads(response_text)
-        
-        # Sanitize replies
-        for item in replies_data:
-            r = item.get("reply", "")
-            r = re.sub(r'<[^>]+>', '', r)
-            r = re.sub(r'\*\*.*?\*\*', '', r)
-            item["reply"] = r
-            
-        return replies_data
+        # All retries failed - fallback to individual generation
+        print(f"Batch generation failed after {max_retries} attempts. Falling back to individual generation...")
+        results = []
+        for tweet in tweets_data:
+            reply = generate_reply(tweet['text'], tone, user_id)
+            results.append({"id": tweet['id'], "reply": reply})
+        return results
 
     except Exception as e:
-        print(f"Batch generation error: {e}")
+        print(f"Batch generation critical error: {e}")
         # Fallback: Error for all
         return [{"id": t['id'], "reply": f"Error: {str(e)[:50]}"} for t in tweets_data]
