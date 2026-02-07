@@ -721,13 +721,56 @@ class BatchManager:
                     utils.add_log(f"  > Batch Scraping {len(batch_ids_to_scrape)} tweets...", "INFO", user_id=session.user_id)
                     await asyncio.sleep(2) # Small safety delay
                     
-                    # Current scraper.get_tweets_batch is synchronous, run in thread
-                    scraped_data = await asyncio.to_thread(
-                        scraper.get_tweets_batch, 
-                        tweet_ids=batch_ids_to_scrape, 
-                        user_id=session.user_id, 
-                        rotation_index=batch_index
-                    )
+                    # Rate limit retry logic
+                    max_rate_limit_retries = 3
+                    rate_limit_cooldown_seconds = 900  # 15 minutes
+                    
+                    for retry_attempt in range(max_rate_limit_retries + 1):
+                        if session.should_stop: break
+                        
+                        # Current scraper.get_tweets_batch is synchronous, run in thread
+                        scraped_data = await asyncio.to_thread(
+                            scraper.get_tweets_batch, 
+                            tweet_ids=batch_ids_to_scrape, 
+                            user_id=session.user_id, 
+                            rotation_index=batch_index
+                        )
+                        
+                        # Check if all accounts were rate limited
+                        if scraped_data.get("_rate_limited") and scraped_data.get("_all_failed"):
+                            if retry_attempt < max_rate_limit_retries:
+                                cooldown_mins = rate_limit_cooldown_seconds // 60
+                                utils.add_log(
+                                    f"⏳ All accounts rate limited! Waiting {cooldown_mins} minutes before retry ({retry_attempt + 1}/{max_rate_limit_retries})...", 
+                                    "WARNING", 
+                                    user_id=session.user_id
+                                )
+                                
+                                # Wait in smaller increments to allow stop checks
+                                for _ in range(rate_limit_cooldown_seconds // 10):
+                                    if session.should_stop:
+                                        utils.add_log("Cooldown interrupted by user.", "WARNING", user_id=session.user_id)
+                                        break
+                                    await asyncio.sleep(10)
+                                
+                                if session.should_stop: break
+                                
+                                utils.add_log(f"🔄 Retrying batch after cooldown...", "INFO", user_id=session.user_id)
+                                continue  # Retry the scrape
+                            else:
+                                utils.add_log(
+                                    f"❌ Max rate limit retries ({max_rate_limit_retries}) exceeded. Skipping this batch.", 
+                                    "ERROR", 
+                                    user_id=session.user_id
+                                )
+                                scraped_data = {}  # Clear the rate limit indicator
+                                break
+                        else:
+                            # Success or normal failure - exit retry loop
+                            break
+                    
+                    # Remove any metadata keys from scraped_data
+                    scraped_data = {k: v for k, v in scraped_data.items() if not k.startswith("_")}
                     
                     # TRACKING: Increment scraped count for batch
                     if scraped_data:

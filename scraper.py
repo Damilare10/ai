@@ -126,6 +126,10 @@ def get_tweets_batch(tweet_ids: list[str], user_id: int = None, rotation_index: 
     Fetches a batch of tweets (up to 100 per call, but we usually do 5) using ONE credential.
     Rotates credentials based on rotation_index (Round Robin).
     Returns a dict: { "tweet_id": "text" }
+    
+    Special return values:
+    - {"_rate_limited": True, "_all_failed": True} = All accounts hit rate limits, caller should wait
+    - {} = Normal empty (tweets deleted/private)
     """
     creds = utils.get_scraping_credentials(user_id)
     if not creds:
@@ -142,6 +146,8 @@ def get_tweets_batch(tweet_ids: list[str], user_id: int = None, rotation_index: 
     attempt_order = attempt_order[cred_idx:] + attempt_order[:cred_idx]
     
     results = {}
+    rate_limit_count = 0  # Track how many accounts hit rate limits
+    total_attempts = len(attempt_order)
     
     for idx in attempt_order:
         cred = creds[idx]
@@ -182,6 +188,7 @@ def get_tweets_batch(tweet_ids: list[str], user_id: int = None, rotation_index: 
 
         except tweepy.errors.TooManyRequests:
             logger.warning(f"⚠️ Rate limit hit for User {user_id} (Key: {key_hint}). Failing over...")
+            rate_limit_count += 1
             time.sleep(1)
             continue # Try next key
             
@@ -196,5 +203,10 @@ def get_tweets_batch(tweet_ids: list[str], user_id: int = None, rotation_index: 
         except Exception as e:
             logger.error(f"Batch scrape error with Key {key_hint}: {e}")
             continue
-            
+    
+    # All accounts failed - check if it was due to rate limits
+    if rate_limit_count == total_attempts:
+        logger.warning(f"🛑 ALL {total_attempts} accounts hit rate limits for User {user_id}!")
+        return {"_rate_limited": True, "_all_failed": True}
+    
     return results # Return whatever we got (maybe empty if all failed)
