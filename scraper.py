@@ -4,6 +4,7 @@ import config
 import time
 import utils
 import random
+import tweet_scraper
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ def _extract_text_from_tweepy_tweet(tweet_data) -> str:
         logger.error(f"Error extracting text from tweet: {e}")
         return ""
 
-def get_tweet_text(tweet_id: str, user_id: int = None) -> str:
+def get_tweet_text(tweet_id: str, user_id: int = None, tweet_url: str = None) -> str:
     """
     Main Entry Point.
     Fetches credentials specific to the user_id and rotates through them locally.
@@ -118,8 +119,30 @@ def get_tweet_text(tweet_id: str, user_id: int = None) -> str:
     error_summary = ", ".join(errors)
     logger.error(f"❌ All {max_attempts} accounts failed for tweet {tweet_id}. Errors: {error_summary}")
     
+    # FALLBACK: Try Browser Scraper
+    logger.info(f"⚠️ API failed for {tweet_id}. Attempting browser fallback...")
+    try:
+        # Use provided URL or construct best-effort
+        target_url = tweet_url if tweet_url else f"https://x.com/i/status/{tweet_id}"
+        
+        # Run async scraper in this sync function (using asyncio.run since we are in a thread)
+        # However, if we are already in an event loop (which we are, in main.py), asyncio.run might fail if not careful.
+        # But wait, main.py calls this via asyncio.to_thread, so we are in a separate thread. 
+        # asyncio.run() *should* create a new loop for this thread.
+        import asyncio
+        fallback_text = asyncio.run(tweet_scraper.scrape_tweet_content(target_url, user_id))
+        
+        if fallback_text and "Error" not in fallback_text:
+            logger.info(f"✅ Browser fallback successful for {tweet_id}")
+            return fallback_text
+        else:
+            logger.error(f"❌ Browser fallback also failed for {tweet_id}")
+            
+    except Exception as e:
+        logger.error(f"❌ Browser fallback exception: {e}")
+
     # Return "accounts exhausted" keyphrase to trigger the sleep in BatchManager
-    return f"Error: All {max_attempts} accounts exhausted or rate limited. Details: {error_summary}"
+    return f"Error: All {max_attempts} accounts exhausted/rate limited AND fallback failed. Details: {error_summary}"
 
 def get_tweets_batch(tweet_ids: list[str], user_id: int = None, rotation_index: int = 0) -> dict[str, str]:
     """

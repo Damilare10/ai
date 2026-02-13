@@ -361,11 +361,11 @@ async def remove_from_queue(request: Request, queue_id: int, current_user: dict 
     wait=wait_exponential(multiplier=1, min=4, max=10),
     retry=retry_if_exception_type(Exception)
 )
-async def scrape_tweet_with_retry(tweet_id: str, user_id: int = None):
+async def scrape_tweet_with_retry(tweet_id: str, user_id: int = None, tweet_url: str = None):
     """Helper function to scrape with retry logic."""
     # scraper.get_tweet_text is now synchronous, so run it in thread pool
     return await asyncio.wait_for(
-        asyncio.to_thread(scraper.get_tweet_text, tweet_id, user_id), 
+        asyncio.to_thread(scraper.get_tweet_text, tweet_id, user_id, tweet_url), 
         timeout=30.0
     )
 
@@ -382,7 +382,7 @@ async def scrape_tweet(request: Request, scrape_req: ScrapeRequest, current_user
         
         # Add timeout to prevent hanging
         try:
-            text = await scrape_tweet_with_retry(tweet_id, user_id=current_user['id'])
+            text = await scrape_tweet_with_retry(tweet_id, user_id=current_user['id'], tweet_url=scrape_req.url)
         except RetryError as e:
             logger.error(f"Retry failed for {tweet_id}: {e}")
             # Check if it was a rate limit error
