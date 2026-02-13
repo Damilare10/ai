@@ -156,7 +156,8 @@ async def scrape_tweet_content(tweet_url: str, user_id=None):
                 
                 try:
                     content = await page.evaluate("document.body.innerText")
-                    print(f"📝 Page Content Preview: {content[:200].replace('\n', ' ')}...")
+                    content_preview = content[:200].replace('\n', ' ')
+                    print(f"📝 Page Content Preview: {content_preview}...")
                 except:
                     print("⚠️ Could not get page content.")
                     
