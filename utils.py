@@ -90,6 +90,16 @@ def get_db_connection():
         # Use Pool if available
         if pg_pool:
             conn = pg_pool.getconn()
+            try:
+                # Validation: Check if connection is alive
+                curs = conn.cursor()
+                curs.execute("SELECT 1")
+                curs.close()
+            except (psycopg2.OperationalError, psycopg2.InterfaceError):
+                logger.warning("♻️ Discarding stale DB connection and fetching new one.")
+                pg_pool.putconn(conn, close=True) # Remove bad conn
+                conn = pg_pool.getconn() # simple_pool should create a new one
+                
             yield conn
             conn.commit()
         # Fallback to SQLite
