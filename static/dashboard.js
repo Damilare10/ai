@@ -19,7 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (statusEl) {
             statusEl.className = '';
-            statusEl.innerHTML = '<a href="/register.html" class="primary-btn" style="text-decoration: none; padding: 6px 12px; font-size: 0.9rem; background-color: var(--secondary); margin-left: 8px;">Register</a>';
+            statusEl.innerHTML = '<a href="/login.html?mode=register" class="primary-btn" style="text-decoration: none; padding: 6px 12px; font-size: 0.9rem; background-color: var(--secondary); margin-left: 8px;">Register</a>';
             statusEl.style.background = 'none';
         }
 

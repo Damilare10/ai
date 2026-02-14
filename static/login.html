@@ -293,6 +293,18 @@
 
         let isLogin = true;
 
+        // Auto-switch to register mode if ?mode=register is in the URL
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('mode') === 'register') {
+            isLogin = false;
+            title.textContent = 'Create Account';
+            submitBtn.textContent = 'Sign Up';
+            toggleText.textContent = "Already have an account?";
+            toggleBtn.textContent = 'Login';
+            confirmGroup.style.display = 'block';
+            confirmInput.required = true;
+        }
+
         // Password visibility toggle
         togglePasswordBtn.addEventListener('click', () => {
             const type = passwordInput.getAttribute('type') === 'password' ? 'text' : 'password';
