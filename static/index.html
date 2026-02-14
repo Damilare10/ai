@@ -295,21 +295,33 @@
                 <button id="creditModalConfirm" class="btn-sm" style="background: #10b981;">Confirm & Add</button>
             </div>
         </div>
-    </div>
+        <div id="devFeatureModal" class="modal">
+            <div class="modal-content glass-panel" style="max-width: 450px; text-align: center;">
+                <span class="modal-close" id="devFeatureModalClose">&times;</span>
+                <div style="font-size: 3rem; margin-bottom: 1rem;">🚧</div>
+                <h3 style="margin-top: 0; color: #f59e0b;">Feature Under Development</h3>
+                <p style="color: #cbd5e1; margin: 1.5rem 0; line-height: 1.6;">
+                    This automatic posting feature requires linked credentials.
+                    <br><br>
+                    If you don't have them, please contact the admin for <strong>bypass credentials</strong>.
+                </p>
+                <button id="devFeatureModalOk" class="primary-btn" style="width: 100%;">Got it</button>
+            </div>
+        </div>
 
-    <div id="toastContainer" class="toast-container"></div>
-    <script src="dashboard.js?v=14"></script>
-    <script>
-        // NUCLEAR OPTION: Unregister Service Worker to allow updates
-        if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.getRegistrations().then(function (registrations) {
-                for (let registration of registrations) {
-                    registration.unregister();
-                    console.log('Service Worker Unregistered (Force Update)');
-                }
-            });
-        }
-    </script>
+        <div id="toastContainer" class="toast-container"></div>
+        <script src="dashboard.js?v=14"></script>
+        <script>
+            // NUCLEAR OPTION: Unregister Service Worker to allow updates
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.getRegistrations().then(function (registrations) {
+                    for (let registration of registrations) {
+                        registration.unregister();
+                        console.log('Service Worker Unregistered (Force Update)');
+                    }
+                });
+            }
+        </script>
 </body>
 
 </html>

@@ -733,6 +733,19 @@ document.addEventListener('DOMContentLoaded', () => {
             updateQueueCount();
             loadStats(); // Refresh stats
         } catch (error) {
+            // CHECK FOR MISSING CREDENTIALS ERROR
+            if (error.message.includes("Posting credentials not configured")) {
+                showDevFeatureModal();
+                btn.disabled = false;
+                btn.textContent = 'Post Reply';
+                // Revert ignore list
+                const queueId = itemElement.dataset.queueId ? parseInt(itemElement.dataset.queueId) : null;
+                if (queueId && typeof locallyDeletedIds !== 'undefined') {
+                    locallyDeletedIds.delete(queueId);
+                }
+                return; // Stop here, don't log error
+            }
+
             log(`Failed to post to ${tweetId}: ${error.message} `, 'error');
             btn.disabled = false;
             btn.textContent = 'Post Reply';
@@ -745,6 +758,29 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     }
+
+    // --- DEV FEATURE MODAL ---
+    const devFeatureModal = document.getElementById('devFeatureModal');
+    const devFeatureModalClose = document.getElementById('devFeatureModalClose');
+    const devFeatureModalOk = document.getElementById('devFeatureModalOk');
+
+    function showDevFeatureModal() {
+        if (devFeatureModal) devFeatureModal.style.display = 'block';
+    }
+
+    if (devFeatureModalClose) {
+        devFeatureModalClose.onclick = () => devFeatureModal.style.display = 'none';
+    }
+    if (devFeatureModalOk) {
+        devFeatureModalOk.onclick = () => devFeatureModal.style.display = 'none';
+    }
+
+    // Close on click outside
+    window.addEventListener('click', (event) => {
+        if (event.target === devFeatureModal) {
+            devFeatureModal.style.display = 'none';
+        }
+    });
 
     function updateQueueCount() {
         const count = reviewList.querySelectorAll('.review-item').length;
