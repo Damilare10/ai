@@ -362,6 +362,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function startBatchProcessing() {
+        if (!token) {
+            window.location.href = '/login.html';
+            return;
+        }
+
         if (isProcessing) return;
 
         const rawText = urlInput.value;
