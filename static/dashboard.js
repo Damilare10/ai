@@ -1,9 +1,31 @@
 document.addEventListener('DOMContentLoaded', () => {
     // --- GLOBAL VARIABLES START ---
+    // --- GLOBAL VARIABLES START ---
     const token = localStorage.getItem('token');
+
+    // --- GUEST MODE LOGIC ---
     if (!token) {
-        window.location.href = '/login.html';
-        return; // Stop execution if no token
+        // Change UI for guest
+        const creditsEl = document.getElementById('creditsDisplay');
+        const statusEl = document.getElementById('systemStatusDisplay');
+        const usernameEl = document.getElementById('sidebarUsername');
+
+        if (creditsEl) {
+            creditsEl.className = ''; // Remove status style
+            creditsEl.innerHTML = '<a href="/login.html" class="primary-btn" style="text-decoration: none; padding: 6px 12px; font-size: 0.9rem;">Login</a>';
+            creditsEl.style.background = 'none';
+            creditsEl.style.border = 'none';
+        }
+
+        if (statusEl) {
+            statusEl.className = '';
+            statusEl.innerHTML = '<a href="/register.html" class="primary-btn" style="text-decoration: none; padding: 6px 12px; font-size: 0.9rem; background-color: var(--secondary); margin-left: 8px;">Register</a>';
+            statusEl.style.background = 'none';
+        }
+
+        if (usernameEl) {
+            usernameEl.innerHTML = 'Guest';
+        }
     }
 
     // --- PWA INSTALL LOGIC ---
@@ -47,6 +69,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Auth Helper
     async function fetchWithAuth(url, options = {}) {
+        if (!token) {
+            console.warn("Guest mode: Skipping auth fetch to " + url);
+            // Return a dummy response that mimics empty data or failure
+            // This prevents the app from crashing when loading stats/history
+            return {
+                ok: false,
+                status: 401,
+                json: async () => [] // Returns empty array/object
+            };
+        }
+
         const headers = options.headers || {};
         headers['Authorization'] = `Bearer ${token}`;
 
@@ -772,8 +805,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             updateChart(stats);
+            updateChart(stats);
         } catch (e) {
-            console.error('Failed to load stats', e);
+            if (token) console.error('Failed to load stats', e);
         }
     }
 
