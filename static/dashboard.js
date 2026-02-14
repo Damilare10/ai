@@ -19,7 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (statusEl) {
             statusEl.className = '';
-            statusEl.innerHTML = '<a href="/login.html?mode=register" class="primary-btn" style="text-decoration: none; padding: 6px 12px; font-size: 0.9rem; background-color: var(--secondary); margin-left: 8px;">Register</a>';
+            statusEl.innerHTML = '<a href="/login.html?mode=register" style="text-decoration: none; padding: 6px 12px; font-size: 0.9rem; background: rgba(59,130,246,0.2); color: #60a5fa; border: 1px solid rgba(59,130,246,0.3); border-radius: 8px; margin-left: 8px;">Register</a>';
             statusEl.style.background = 'none';
         }
 
