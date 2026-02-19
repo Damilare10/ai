@@ -20,6 +20,7 @@ from jose import JWTError, jwt
 
 # Import our modules
 import scraper
+import tweet_scraper
 import ai_agent
 import poster
 import utils
@@ -640,6 +641,7 @@ class BatchSession:
         self.is_processing = True
         self.should_stop = False
         self.task = None
+        self.api_cooldown_until = None  # Track when to retry API
 
 class BatchManager:
     def __init__(self):
@@ -728,6 +730,15 @@ class BatchManager:
                     for retry_attempt in range(max_rate_limit_retries + 1):
                         if session.should_stop: break
                         
+                        # 0. Check Cooldown
+                        if session.api_cooldown_until:
+                            if datetime.now() < session.api_cooldown_until:
+                                utils.add_log(f"📉 API in cooldown. Skipping API attempt and going straight to Fallback...", "INFO", user_id=session.user_id)
+                                break # Skip API, go to fallback
+                            else:
+                                session.api_cooldown_until = None # Cooldown expired
+                                utils.add_log(f"🟢 API cooldown expired. Resuming API attempts.", "INFO", user_id=session.user_id)
+
                         # Current scraper.get_tweets_batch is synchronous, run in thread
                         scraped_data = await asyncio.to_thread(
                             scraper.get_tweets_batch, 
@@ -736,43 +747,56 @@ class BatchManager:
                             rotation_index=batch_index
                         )
                         
-                        # Check if all accounts were rate limited
-                        if scraped_data.get("_rate_limited") and scraped_data.get("_all_failed"):
-                            if retry_attempt < max_rate_limit_retries:
-                                cooldown_mins = rate_limit_cooldown_seconds // 60
-                                utils.add_log(
-                                    f"⏳ All accounts rate limited! Waiting {cooldown_mins} minutes before retry ({retry_attempt + 1}/{max_rate_limit_retries})...", 
-                                    "WARNING", 
-                                    user_id=session.user_id
-                                )
-                                
-                                # Wait with minute-by-minute countdown pings
-                                for mins_remaining in range(cooldown_mins - 1, 0, -1):
-                                    if session.should_stop:
-                                        utils.add_log("Cooldown interrupted by user.", "WARNING", user_id=session.user_id)
-                                        break
-                                    await asyncio.sleep(60)  # Wait 1 minute
-                                    utils.add_log(f"⏳ Cooldown: {mins_remaining} minutes remaining...", "INFO", user_id=session.user_id)
-                                
-                                # Wait final minute
-                                if not session.should_stop:
-                                    await asyncio.sleep(60)
-                                
-                                if session.should_stop: break
-                                
-                                utils.add_log(f"🔄 Retrying batch after cooldown...", "INFO", user_id=session.user_id)
-                                continue  # Retry the scrape
-                            else:
-                                utils.add_log(
-                                    f"❌ Max rate limit retries ({max_rate_limit_retries}) exceeded. Skipping this batch.", 
-                                    "ERROR", 
-                                    user_id=session.user_id
-                                )
-                                scraped_data = {}  # Clear the rate limit indicator
-                                break
+                        # Check if all accounts failed (Rate Limit or Auth Error)
+                        if scraped_data.get("_all_failed"):
+                            # Logic: If all failed, we trigger cooldown and fallback IMMEDIATELY
+                            cooldown_mins = 15
+                            session.api_cooldown_until = datetime.now() + timedelta(minutes=cooldown_mins)
+                            
+                            utils.add_log(
+                                f"🛑 All API keys exhausted (Rate Limit/Auth). Entering {cooldown_mins}m background cooldown.", 
+                                "WARNING", 
+                                user_id=session.user_id
+                            )
+                            utils.add_log(f"🔄 Switching to Web Scraper Fallback immediately...", "INFO", user_id=session.user_id)
+                            
+                            scraped_data = {} # Clear error flags
+                            break # Exit retry loop, proceed to fallback
                         else:
-                            # Success or normal failure - exit retry loop
+                            # Success or normal partial failure
                             break
+                    
+                    # Remove any metadata keys from scraped_data
+                    scraped_data = {k: v for k, v in scraped_data.items() if not k.startswith("_")}
+                    
+                    # --- FALLBACK LOGIC ---
+                    # Check what we missed
+                    missing_ids = [tid for tid in batch_ids_to_scrape if tid not in scraped_data]
+                    
+                    if missing_ids:
+                        utils.add_log(f"⚠️ {len(missing_ids)} tweets missed by API. Attempting Web Scraper Fallback...", "INFO", user_id=session.user_id)
+                        
+                        for m_id in missing_ids:
+                            if session.should_stop: break
+                            
+                            # Use id_to_url map
+                            m_url = id_to_url.get(m_id)
+                            if not m_url: continue
+                                
+                            try:
+                                utils.add_log(f"  🕷️ Web Scraping {m_id}...", "INFO", user_id=session.user_id)
+                                # Run tweet_scraper.scrape_tweet_content async
+                                # Note: It uses Playwright, needs to be awaited
+                                fallback_text = await tweet_scraper.scrape_tweet_content(m_url, user_id=session.user_id)
+                                
+                                if fallback_text:
+                                    scraped_data[m_id] = fallback_text
+                                    utils.add_log(f"  ✅ Web Scrape Success for {m_id}", "SUCCESS", user_id=session.user_id)
+                                else:
+                                    utils.add_log(f"  ❌ Web Scrape Failed for {m_id}", "ERROR", user_id=session.user_id)
+                            except Exception as e:
+                                utils.add_log(f"  ❌ Web Scrape Error for {m_id}: {e}", "ERROR", user_id=session.user_id)
+                    # ----------------------
                     
                     # Remove any metadata keys from scraped_data
                     scraped_data = {k: v for k, v in scraped_data.items() if not k.startswith("_")}
