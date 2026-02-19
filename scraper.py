@@ -159,10 +159,6 @@ def get_tweets_batch(tweet_ids: list[str], user_id: int = None, rotation_index: 
         logger.error("No scraping credentials found.")
         return {}
 
-    # TEST MODE: Force API failure to test fallback
-    logger.warning("🧪 TEST MODE: Simulating API failure to test Web Scraper Fallback...")
-    return {"_all_failed": True}
-
     # 1. Select Credential (Round Robin based on batch index)
     # This ensures Batch 1 uses Key 1, Batch 2 uses Key 2, etc.
     cred_idx = rotation_index % len(creds)
