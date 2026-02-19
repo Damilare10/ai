@@ -38,7 +38,7 @@ Ensure your latest code (including the recent changes to support environment var
 3.  **Name**: `aireply-app`
 4.  **Region**: **Must be the same** as your database.
 5.  **Runtime**: **Python 3**
-6.  **Build Command**: `pip install -r requirements.txt`
+6.  **Build Command**: `./build.sh` (This installs Python packages AND Playwright system dependencies)
 7.  **Start Command**: `uvicorn main:app --host 0.0.0.0 --port 8000`
 8.  **Environment Variables**:
     *   `DATABASE_URL`: Paste the **Internal Connection String** from Step 2.
