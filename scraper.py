@@ -169,7 +169,9 @@ def get_tweets_batch(tweet_ids: list[str], user_id: int = None, rotation_index: 
     attempt_order = attempt_order[cred_idx:] + attempt_order[:cred_idx]
     
     results = {}
-    rate_limit_count = 0  # Track how many accounts hit rate limits
+    # Track different types of errors
+    rate_limit_count = 0 
+    auth_error_count = 0
     total_attempts = len(attempt_order)
     
     for idx in attempt_order:
@@ -217,19 +219,22 @@ def get_tweets_batch(tweet_ids: list[str], user_id: int = None, rotation_index: 
             
         except tweepy.errors.Forbidden as e:
             logger.warning(f"⛔ Forbidden for User {user_id} (Key: {key_hint}): {e}")
+            auth_error_count += 1
             continue
             
         except tweepy.errors.Unauthorized as e:
             logger.error(f"❌ Unauthorized (Bad Keys) for User {user_id} (Key: {key_hint}): {e}")
+            auth_error_count += 1
             continue
             
         except Exception as e:
             logger.error(f"Batch scrape error with Key {key_hint}: {e}")
             continue
     
-    # All accounts failed - check if it was due to rate limits
-    if rate_limit_count == total_attempts:
-        logger.warning(f"🛑 ALL {total_attempts} accounts hit rate limits for User {user_id}!")
-        return {"_rate_limited": True, "_all_failed": True}
+    # Check if ALL accounts failed due to API limits/auth issues
+    total_failures = rate_limit_count + auth_error_count
+    if total_failures == total_attempts:
+        logger.warning(f"🛑 ALL {total_attempts} accounts failed (Rate Limits: {rate_limit_count}, Auth Errors: {auth_error_count}) for User {user_id}!")
+        return {"_all_failed": True}
     
     return results # Return whatever we got (maybe empty if all failed)

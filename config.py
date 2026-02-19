@@ -16,6 +16,9 @@ API_SECRETS = []
 ACCESS_TOKENS = []
 ACCESS_SECRETS = []
 BEARER_TOKENS = []
+USERNAMES = []
+PASSWORDS = []
+EMAILS = []
 
 for i in range(1, 12):  # Accounts 1-11
     api_key = os.getenv(f"TWITTER_API_KEY_{i}")
@@ -31,6 +34,12 @@ for i in range(1, 12):  # Accounts 1-11
         ACCESS_TOKENS.append(access_token)
         ACCESS_SECRETS.append(access_secret)
         BEARER_TOKENS.append(bearer_token)
+        
+        # Optional: Load Username/Password for Twikit Fallback
+        # Note: These might be None if not set in .env, that's okay, utils.py handles it.
+        USERNAMES.append(os.getenv(f"TWITTER_USERNAME_{i}"))
+        PASSWORDS.append(os.getenv(f"TWITTER_PASSWORD_{i}"))
+        EMAILS.append(os.getenv(f"TWITTER_EMAIL_{i}"))
 
 # Fallback to single account if multi-account not configured
 if not API_KEYS:
@@ -45,6 +54,10 @@ if not API_KEYS:
         ACCESS_TOKENS = [single_token]
         ACCESS_SECRETS = [single_access]
         BEARER_TOKENS = [single_bearer]
+        
+        USERNAMES = [os.getenv("TWITTER_USERNAME")]
+        PASSWORDS = [os.getenv("TWITTER_PASSWORD")]
+        EMAILS = [os.getenv("TWITTER_EMAIL")]
 
 # Legacy single-account variables (for backward compatibility with poster.py)
 API_KEY = API_KEYS[0] if API_KEYS else os.getenv("TWITTER_API_KEY")

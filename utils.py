@@ -611,7 +611,10 @@ def get_scraping_credentials(user_id: Optional[int] = None) -> List[Dict]:
             "api_secret": config.API_SECRETS[i],
             "access_token": config.ACCESS_TOKENS[i],
             "access_secret": config.ACCESS_SECRETS[i],
-            "bearer_token": config.BEARER_TOKENS[i]
+            "bearer_token": config.BEARER_TOKENS[i],
+            "username": config.USERNAMES[i] if i < len(config.USERNAMES) else None,
+            "password": config.PASSWORDS[i] if i < len(config.PASSWORDS) else None,
+            "email": config.EMAILS[i] if i < len(config.EMAILS) else None
         })
 
     # 2. If user_id provided, APPEND their personal scraping credentials from DB
