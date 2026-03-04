@@ -8,13 +8,13 @@ from typing import List, Dict, Optional, Tuple, Any
 import re
 import config
 
-# Try to import psycopg2
+# Try to import psycopg 3
 try:
-    import psycopg2
-    from psycopg2 import pool
-    from psycopg2.extras import RealDictCursor
+    import psycopg
+    from psycopg_pool import ConnectionPool
+    from psycopg.rows import dict_row
 except ImportError:
-    psycopg2 = None
+    psycopg = None
 
 DB_NAME = "history.db"
 
@@ -65,12 +65,14 @@ pg_pool = None
 def init_pool():
     global pg_pool
     db_url = os.getenv("DATABASE_URL")
-    if db_url and psycopg2:
+    if db_url and psycopg:
         try:
-            # FIX: Added cursor_factory=RealDictCursor so all connections return Dicts
-            pg_pool = psycopg2.pool.SimpleConnectionPool(
-                1, 20, db_url, 
-                cursor_factory=RealDictCursor
+            # psycopg 3 connection pool implementation
+            pg_pool = ConnectionPool(
+                conninfo=db_url,
+                min_size=1, 
+                max_size=20,
+                kwargs={"row_factory": dict_row}
             )
             logger.info("✅ PostgreSQL Connection Pool Initialized")
         except Exception as e:
@@ -91,14 +93,14 @@ def get_db_connection():
         if pg_pool:
             conn = pg_pool.getconn()
             try:
-                # Validation: Check if connection is alive
-                curs = conn.cursor()
-                curs.execute("SELECT 1")
-                curs.close()
-            except (psycopg2.OperationalError, psycopg2.InterfaceError):
+                # Validation: Check if connection is alive (psycopg3 handles this mostly but keeping logic)
+                with conn.cursor() as curs:
+                    curs.execute("SELECT 1")
+            except (psycopg.OperationalError, psycopg.InterfaceError):
                 logger.warning("♻️ Discarding stale DB connection and fetching new one.")
-                pg_pool.putconn(conn, close=True) # Remove bad conn
-                conn = pg_pool.getconn() # simple_pool should create a new one
+                # the psycopg_pool has a check() mechanism automatically, but manual disconnect:
+                conn.close() 
+                conn = pg_pool.getconn() 
                 
             yield conn
             conn.commit()
@@ -193,7 +195,7 @@ def init_db():
             # Postgres check column
             try:
                 c.execute("SELECT tweet_text FROM history LIMIT 1")
-            except psycopg2.Error:
+            except psycopg.Error:
                 conn.rollback()
                 logger.info("Migrating history table: adding tweet_text column")
                 c.execute("ALTER TABLE history ADD COLUMN tweet_text TEXT")
@@ -230,7 +232,7 @@ def init_db():
         # Migration: Add new stats columns if they don't exist
         try:
             c.execute("SELECT scraped_count FROM stats LIMIT 1")
-        except (sqlite3.OperationalError, psycopg2.Error if psycopg2 else Exception):
+        except (sqlite3.OperationalError, psycopg.Error if psycopg else Exception):
             if pg_pool: conn.rollback()
             logger.info("Migrating stats table: adding scraped_count and generated_count")
             try:
@@ -604,18 +606,10 @@ def save_settings_to_db(settings: Dict, user_id: int):
 def get_scraping_credentials(user_id: Optional[int] = None) -> List[Dict]:
     creds_pool = []
     
-    # 1. ALWAYS load System Credentials (from .env via config.py)
-    for i in range(len(config.API_KEYS)):
-        creds_pool.append({
-            "api_key": config.API_KEYS[i],
-            "api_secret": config.API_SECRETS[i],
-            "access_token": config.ACCESS_TOKENS[i],
-            "access_secret": config.ACCESS_SECRETS[i],
-            "bearer_token": config.BEARER_TOKENS[i],
-            "username": config.USERNAMES[i] if i < len(config.USERNAMES) else None,
-            "password": config.PASSWORDS[i] if i < len(config.PASSWORDS) else None,
-            "email": config.EMAILS[i] if i < len(config.EMAILS) else None
-        })
+    # 1. ALWAYS add the system-level TwitterAPI.io key first (available to all users)
+    system_twitterapiio_key = config.TWITTERAPI_IO_KEY
+    if system_twitterapiio_key:
+        creds_pool.append({"api_key": system_twitterapiio_key})
 
     # 2. If user_id provided, APPEND their personal scraping credentials from DB
     if user_id:

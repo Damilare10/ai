@@ -1,240 +1,198 @@
 import logging
-import tweepy
+import requests
 import config
 import time
 import utils
 import random
-import tweet_scraper
 
 logger = logging.getLogger(__name__)
 
-def _extract_text_from_tweepy_tweet(tweet_data) -> str:
-    """Helper to extract text from Tweet object."""
-    try:
-        # LEVEL 1: Check for note_tweet (long-form)
-        if hasattr(tweet_data, 'note_tweet') and tweet_data.note_tweet:
-            note_text = tweet_data.note_tweet.get('text', '')
-            if note_text:
-                logger.info(f"✅ Found note_tweet (long-form) for tweet {tweet_data.id}")
-                return note_text
-        
-        # LEVEL 2: Standard text
-        if hasattr(tweet_data, 'text') and tweet_data.text:
-            logger.info(f"Using standard text for tweet {tweet_data.id}")
-            return tweet_data.text
-        
-        logger.warning(f"⚠️ No text found for tweet {tweet_data.id}")
-        return ""
-    except Exception as e:
-        logger.error(f"Error extracting text from tweet: {e}")
-        return ""
+# TwitterAPI.io base URL
+TWITTERAPI_BASE = "https://api.twitterapi.io"
+
+def _extract_from_tweet_obj(tweet_obj: dict):
+    """
+    Extract (text, username) from a TwitterAPI.io tweet object.
+    Response schema: { id, text, author: { userName, ... }, ... }
+    """
+    text = tweet_obj.get('text', '')
+    author = tweet_obj.get('author') or {}
+    username = author.get('userName') or author.get('username') or ''
+    return text, username
+
 
 def get_tweet_text(tweet_id: str, user_id: int = None, tweet_url: str = None) -> str:
     """
-    Main Entry Point.
-    Fetches credentials specific to the user_id and rotates through them locally.
-    Uses random shuffling for load balancing.
+    Fetch a single tweet's text via TwitterAPI.io.
+    Tries all available credentials in shuffled order for load balancing.
     """
-    # 1. Get credentials ONLY for this user (which now includes system pool)
     creds = utils.get_scraping_credentials(user_id)
-    
+
     if not creds:
-        return "Error: No scraping accounts configured. Please add them in Settings."
-    
-    # Shuffle credentials to spread load (Simple Load Balancing)
+        return "Error: No scraping accounts configured. Please add a TwitterAPI.io key in Settings."
+
     random.shuffle(creds)
-    
-    max_attempts = len(creds)
-    errors = [] # Track errors for debugging
-    
+    errors = []
+
     for attempt, cred in enumerate(creds):
-        # Add small cooldown between attempts if retrying
         if attempt > 0:
             time.sleep(2)
 
-        # We can't identify "Account #1" easily after shuffle without extra tracking, 
-        # so we rely on the API key or just "Account Index [i]" logging.
-        # Let's log a truncated key for ID.
-        key_hint = cred["api_key"][:4] + "..." if cred.get("api_key") else "Unknown"
-        logger.info(f"🔄 User {user_id}: Using API account (Key: {key_hint}) for tweet {tweet_id}")
+        api_key = cred.get("api_key", "").strip()
+        if not api_key:
+            errors.append("Missing API Key")
+            continue
+
+        key_hint = api_key[:6] + "..."
+        logger.info(f"🔄 User {user_id}: Fetching tweet {tweet_id} via TwitterAPI.io (Key: {key_hint})")
 
         try:
-            # 2. Initialize Client with SPECIFIC credentials
-            client = tweepy.Client(
-                bearer_token=cred["bearer_token"],
-                consumer_key=cred["api_key"],
-                consumer_secret=cred["api_secret"],
-                access_token=cred["access_token"],
-                access_token_secret=cred["access_secret"]
+            response = requests.get(
+                f"{TWITTERAPI_BASE}/twitter/tweets",
+                headers={"X-API-Key": api_key},
+                params={"tweet_ids": tweet_id},
+                timeout=15
             )
-            
-            # 3. Fetch Tweet
-            response = client.get_tweet(
-                id=tweet_id,
-                tweet_fields=['text', 'note_tweet'],
-                expansions=['author_id']
-            )
-            
-            if not response or not response.data:
-                # If we get a 200 OK but empty data, it might mean weird permissions or deleted.
-                # Usually tweepy raises exception for errors. 
-                logger.warning(f"  > Empty response for tweet {tweet_id} with Key {key_hint}")
-                errors.append(f"{key_hint}: Empty Response")
+
+            if response.status_code == 429:
+                logger.warning(f"⚠️ Rate limit hit (Key: {key_hint})")
+                errors.append("RateLimit")
+                time.sleep(1)
                 continue
-            
-            text = _extract_text_from_tweepy_tweet(response.data)
-            
+
+            if response.status_code in (401, 403):
+                logger.error(f"❌ Auth error (Key: {key_hint}): {response.status_code}")
+                errors.append(f"AuthError-{response.status_code}")
+                continue
+
+            if response.status_code == 404:
+                return f"Error: Tweet {tweet_id} not found (deleted or private)"
+
+            response.raise_for_status()
+            data = response.json()
+
+            if data.get('status') == 'error':
+                logger.warning(f"API returned error: {data.get('message')} (Key: {key_hint})")
+                errors.append(f"APIError: {data.get('message', 'unknown')}")
+                continue
+
+            tweets = data.get('tweets', [])
+            if not tweets:
+                logger.warning(f"Empty tweet list for {tweet_id} (Key: {key_hint})")
+                errors.append("EmptyResponse")
+                continue
+
+            text, username = _extract_from_tweet_obj(tweets[0])
             if text:
+                logger.info(f"✅ Successfully scraped tweet {tweet_id}")
+                if username:
+                    return f"@{username} | {text}"
                 return text
-            
-        except tweepy.errors.TooManyRequests:
-            logger.warning(f"⚠️ Rate limit hit for User {user_id} (Key: {key_hint})")
-            errors.append(f"RateLimit")
-            continue  # Try next account
-        
-        except tweepy.errors.Forbidden as e:
-            # FIX: Don't stop on Forbidden. Could be a bad credential or specific restrictions.
-            # Only stop if ALL accounts fail.
-            logger.warning(f"⛔ Forbidden for User {user_id} (Key: {key_hint}): {e}")
-            errors.append(f"Forbidden")
-            continue 
-        
-        except tweepy.errors.NotFound:
-            # If ANY account says "Not Found", the tweet is likely actually deleted.
-            # No point checking other accounts (unless user blocks specific account?)
-            # Assuming deleted:
-            return f"Error: Tweet {tweet_id} not found (deleted or private)"
-        
-        except tweepy.errors.Unauthorized as e:
-            logger.error(f"❌ Unauthorized (Bad Keys) for User {user_id} (Key: {key_hint}): {e}")
-            errors.append(f"Unauthorized")
+
+            errors.append("EmptyText")
+
+        except requests.exceptions.Timeout:
+            logger.error(f"Timeout for tweet {tweet_id} (Key: {key_hint})")
+            errors.append("Timeout")
             continue
 
         except Exception as e:
-            logger.error(f"Error with account (Key: {key_hint}): {e}")
-            errors.append(f"{type(e).__name__}")
+            logger.error(f"Error with key {key_hint}: {e}")
+            errors.append(f"{type(e).__name__}: {e}")
             continue
 
-    # If we fall through, all accounts failed
     error_summary = ", ".join(errors)
-    logger.error(f"❌ All {max_attempts} accounts failed for tweet {tweet_id}. Errors: {error_summary}")
-    
-    # FALLBACK: Try Browser Scraper
-    logger.info(f"⚠️ API failed for {tweet_id}. Attempting browser fallback...")
-    try:
-        # Use provided URL or construct best-effort
-        target_url = tweet_url if tweet_url else f"https://x.com/i/status/{tweet_id}"
-        
-        # Run async scraper in this sync function (using asyncio.run since we are in a thread)
-        # However, if we are already in an event loop (which we are, in main.py), asyncio.run might fail if not careful.
-        # But wait, main.py calls this via asyncio.to_thread, so we are in a separate thread. 
-        # asyncio.run() *should* create a new loop for this thread.
-        import asyncio
-        fallback_text = asyncio.run(tweet_scraper.scrape_tweet_content(target_url, user_id))
-        
-        if fallback_text and "Error" not in fallback_text:
-            logger.info(f"✅ Browser fallback successful for {tweet_id}")
-            return fallback_text
-        else:
-            logger.error(f"❌ Browser fallback also failed for {tweet_id}")
-            
-    except Exception as e:
-        logger.error(f"❌ Browser fallback exception: {e}")
+    logger.error(f"❌ All accounts failed for tweet {tweet_id}. Errors: {error_summary}")
+    return f"Error: All accounts exhausted/rate limited. Details: {error_summary}"
 
-    # Return "accounts exhausted" keyphrase to trigger the sleep in BatchManager
-    return f"Error: All {max_attempts} accounts exhausted/rate limited AND fallback failed. Details: {error_summary}"
 
 def get_tweets_batch(tweet_ids: list[str], user_id: int = None, rotation_index: int = 0) -> dict[str, str]:
     """
-    Fetches a batch of tweets (up to 100 per call, but we usually do 5) using ONE credential.
-    Rotates credentials based on rotation_index (Round Robin).
-    Returns a dict: { "tweet_id": "text" }
-    
+    Batch-fetch tweets via TwitterAPI.io using a single request with comma-separated IDs.
+    Returns: { "tweet_id": "@username | text", ... }
+
     Special return values:
-    - {"_rate_limited": True, "_all_failed": True} = All accounts hit rate limits, caller should wait
-    - {} = Normal empty (tweets deleted/private)
+    - {"_all_failed": True} = All accounts rate-limited/auth-failed
+    - {} = Tweets not found / empty
     """
     creds = utils.get_scraping_credentials(user_id)
     if not creds:
         logger.error("No scraping credentials found.")
         return {}
 
-    # 1. Select Credential (Round Robin based on batch index)
-    # This ensures Batch 1 uses Key 1, Batch 2 uses Key 2, etc.
+    # Round-robin credential selection
     cred_idx = rotation_index % len(creds)
-    
-    # Try the selected credential, but allow failover to others if it fails
     attempt_order = list(range(len(creds)))
-    # Rotate order so selected is first: [2, 3, 0, 1] if idx is 2
     attempt_order = attempt_order[cred_idx:] + attempt_order[:cred_idx]
-    
-    results = {}
-    # Track different types of errors
-    rate_limit_count = 0 
+
+    rate_limit_count = 0
     auth_error_count = 0
     total_attempts = len(attempt_order)
-    
+
     for idx in attempt_order:
         cred = creds[idx]
-        key_hint = cred["api_key"][:4] + "..." if cred.get("api_key") else "Unknown"
-        logger.info(f"🔄 User {user_id}: Batch Scrape (Size {len(tweet_ids)}) using Account #{idx+1} (Key: {key_hint})")
-        
-        try:
-            client = tweepy.Client(
-                bearer_token=cred["bearer_token"],
-                consumer_key=cred["api_key"],
-                consumer_secret=cred["api_secret"],
-                access_token=cred["access_token"],
-                access_token_secret=cred["access_secret"]
-            )
-            
-            # 2. Batch Fetch
-            response = client.get_tweets(
-                ids=tweet_ids,
-                tweet_fields=['text', 'note_tweet'],
-                expansions=['author_id']
-            )
-            
-            if response and response.data:
-                for tweet in response.data:
-                    text = _extract_text_from_tweepy_tweet(tweet)
-                    if text:
-                        results[str(tweet.id)] = text
-                
-                logger.info(f"✅ Automatically scraped {len(results)}/{len(tweet_ids)} tweets.")
-                return results # Success! Return immediately.
-                
-            else:
-                logger.warning(f"  > Empty batch response with Key {key_hint}")
-                # Don't failover immediately for empty response, might be just empty.
-                # But if ALL are empty, we return empty dict.
-                # Actually, empty response usually means none found (deleted/private), which is valid result.
-                return {} 
+        api_key = cred.get("api_key", "").strip()
+        if not api_key:
+            auth_error_count += 1
+            continue
 
-        except tweepy.errors.TooManyRequests:
-            logger.warning(f"⚠️ Rate limit hit for User {user_id} (Key: {key_hint}). Failing over...")
-            rate_limit_count += 1
-            time.sleep(1)
-            continue # Try next key
-            
-        except tweepy.errors.Forbidden as e:
-            logger.warning(f"⛔ Forbidden for User {user_id} (Key: {key_hint}): {e}")
-            auth_error_count += 1
+        key_hint = api_key[:6] + "..."
+        logger.info(f"🔄 User {user_id}: Batch ({len(tweet_ids)} tweets) via Account #{idx+1} (Key: {key_hint})")
+
+        try:
+            # TwitterAPI.io supports comma-separated IDs in a single request
+            ids_param = ",".join(tweet_ids)
+            response = requests.get(
+                f"{TWITTERAPI_BASE}/twitter/tweets",
+                headers={"X-API-Key": api_key},
+                params={"tweet_ids": ids_param},
+                timeout=20
+            )
+
+            if response.status_code == 429:
+                logger.warning(f"⚠️ Rate limit (Key: {key_hint}). Failing over...")
+                rate_limit_count += 1
+                time.sleep(1)
+                continue
+
+            if response.status_code in (401, 403):
+                logger.warning(f"⛔ Auth error {response.status_code} (Key: {key_hint})")
+                auth_error_count += 1
+                continue
+
+            response.raise_for_status()
+            data = response.json()
+
+            if data.get('status') == 'error':
+                logger.warning(f"API error: {data.get('message')} (Key: {key_hint})")
+                continue
+
+            tweets = data.get('tweets', [])
+            if not tweets:
+                logger.warning(f"Empty batch response (Key: {key_hint})")
+                return {}
+
+            results = {}
+            for tweet_obj in tweets:
+                tid = str(tweet_obj.get('id', ''))
+                text, username = _extract_from_tweet_obj(tweet_obj)
+                if tid and text:
+                    results[tid] = f"@{username} | {text}" if username else text
+
+            logger.info(f"✅ Scraped {len(results)}/{len(tweet_ids)} tweets.")
+            return results  # Success, return immediately
+
+        except requests.exceptions.Timeout:
+            logger.error(f"Batch timeout (Key: {key_hint})")
             continue
-            
-        except tweepy.errors.Unauthorized as e:
-            logger.error(f"❌ Unauthorized (Bad Keys) for User {user_id} (Key: {key_hint}): {e}")
-            auth_error_count += 1
-            continue
-            
+
         except Exception as e:
-            logger.error(f"Batch scrape error with Key {key_hint}: {e}")
+            logger.error(f"Batch error (Key: {key_hint}): {e}")
             continue
-    
-    # Check if ALL accounts failed due to API limits/auth issues
+
     total_failures = rate_limit_count + auth_error_count
-    if total_failures == total_attempts:
-        logger.warning(f"🛑 ALL {total_attempts} accounts failed (Rate Limits: {rate_limit_count}, Auth Errors: {auth_error_count}) for User {user_id}!")
+    if total_failures >= total_attempts:
+        logger.warning(f"🛑 ALL {total_attempts} accounts failed (Rate: {rate_limit_count}, Auth: {auth_error_count})")
         return {"_all_failed": True}
-    
-    return results # Return whatever we got (maybe empty if all failed)
+
+    return {}

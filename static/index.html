@@ -34,9 +34,6 @@
                 <a href="#" class="nav-item" data-view="history-view">
                     <span>🕒</span> History
                 </a>
-                <a href="#" class="nav-item" data-view="settings-view">
-                    <span>⚙️</span> Settings
-                </a>
                 <a href="#" id="adminStatusLink" class="nav-item" data-view="admin-status-view" style="display: none;">
                     <span>📈</span> Status
                 </a>
@@ -45,17 +42,17 @@
                 </a>
             </nav>
 
-            <a href="https://t.me/telemtsa" target="_blank"
-                style="text-decoration: none; color: inherit; margin-top: auto;">
-                <div id="userWidget"
-                    style="padding: 16px; background: rgba(255,255,255,0.03); border-radius: 12px; border: 1px solid rgba(255,255,255,0.08);">
-                    <div style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 4px;">Signed in as</div>
-                    <div id="sidebarUsername"
-                        style="font-weight: 600; color: white; display: flex; align-items: center; gap: 8px;">
-                        <span>...</span>
-                    </div>
+            <div id="userWidget"
+                style="padding: 16px; background: rgba(255,255,255,0.03); border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); cursor: pointer; transition: background 0.2s; margin-top: auto;"
+                onclick="document.getElementById('userProfileModal').style.display='flex'"
+                onmouseenter="this.style.background='rgba(255,255,255,0.07)'"
+                onmouseleave="this.style.background='rgba(255,255,255,0.03)'">
+                <div style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 4px;">Signed in as</div>
+                <div id="sidebarUsername"
+                    style="font-weight: 600; color: white; display: flex; align-items: center; gap: 8px;">
+                    <span>...</span>
                 </div>
-            </a>
+            </div>
         </aside>
 
         <!-- Main Content -->
@@ -71,7 +68,7 @@
                         style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; border-color: rgba(59, 130, 246, 0.3);">
                         Credits: --
                     </div>
-                    <div id="systemStatusDisplay" class="status-indicator online">System Online</div>
+
                 </div>
             </div>
 
@@ -189,66 +186,36 @@
                 </div>
             </div>
 
-            <!-- Settings View -->
-            <div id="settings-view" class="view-section" style="display: none;">
-                <div class="glass-panel">
-                    <div class="panel-header">
-                        <h2>Settings</h2>
-                        <button id="toggleCredentials" class="icon-btn" title="Toggle Visibility">👁️</button>
-                    </div>
 
-                    <div class="settings-section">
-                        <h3>Posting Account Credentials</h3>
-                        <p class="subtitle">Used for posting replies on your behalf</p>
-                        <div class="form-group">
-                            <label>API Key</label>
-                            <input type="text" id="postApiKey" placeholder="API Key">
-                        </div>
-                        <div class="form-group">
-                            <label>API Secret</label>
-                            <input type="password" id="postApiSecret" placeholder="API Secret">
-                        </div>
-                        <div class="form-group">
-                            <label>Access Token</label>
-                            <input type="text" id="postAccessToken" placeholder="Access Token">
-                        </div>
-                        <div class="form-group">
-                            <label>Access Secret</label>
-                            <input type="password" id="postAccessSecret" placeholder="Access Secret">
-                        </div>
-                    </div>
-
-
-
-                    <div class="settings-section" style="margin-top: 2rem;">
-                        <div
-                            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-                            <div>
-                                <h3>Scraping Accounts (Twitter API v2)</h3>
-                                <p class="subtitle">Used for reading tweets (Round Robin)</p>
-                            </div>
-                            <button id="addScrapingAccountBtn" class="btn-sm btn-secondary">+ Add Account</button>
-                        </div>
-                        <div id="scrapingAccountsList">
-                            <!-- Scraping accounts injected here -->
-                        </div>
-                    </div>
-
-                    <div style="margin-top: 2rem; padding-top: 1.5rem;">
-                        <button id="saveSettingsBtn" class="primary-btn" style="width: 100%; margin-bottom: 1rem;">Save
-                            Settings</button>
-                    </div>
-
-                    <div style="margin-top: 1rem; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 1.5rem;">
-                        <button id="settingsLogoutBtn" class="primary-btn"
-                            style="background-color: #ef4444; width: 100%;">Logout</button>
-                    </div>
-                </div>
-            </div>
         </main>
         </main>
         <div class="watermark">
             Made by <a href="https://t.me/Web3kaijun" target="_blank">Kaiju</a> (v14)
+        </div>
+    </div>
+
+    <!-- User Profile Modal -->
+    <div id="userProfileModal"
+        style="display: none; position: fixed; inset: 0; z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); background: rgba(0,0,0,0.5);"
+        onclick="if(event.target===this)this.style.display='none'">
+        <div
+            style="background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.12); border-radius: 20px; padding: 2rem; width: 320px; text-align: center; box-shadow: 0 25px 60px rgba(0,0,0,0.6); animation: fadeInScale 0.2s ease;">
+            <div style="font-size: 3rem; margin-bottom: 0.5rem;">👤</div>
+            <div style="font-size: 0.8rem; color: #64748b; margin-bottom: 4px;">Signed in as</div>
+            <div id="profileModalUsername"
+                style="font-size: 1.2rem; font-weight: 700; color: #fff; margin-bottom: 1.5rem;">...</div>
+            <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                <a href="https://t.me/telemtsa" target="_blank" style="text-decoration: none;">
+                    <button
+                        style="width: 100%; padding: 0.75rem; border-radius: 12px; border: none; background: linear-gradient(135deg, #229ed9, #0088cc); color: white; font-size: 0.95rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: opacity 0.2s;"
+                        onmouseenter="this.style.opacity='0.85'" onmouseleave="this.style.opacity='1'">✈️ Join Telegram
+                        Community</button>
+                </a>
+                <button id="profileLogoutBtn"
+                    style="width: 100%; padding: 0.75rem; border-radius: 12px; border: none; background: rgba(239,68,68,0.15); color: #ef4444; font-size: 0.95rem; font-weight: 600; cursor: pointer; border: 1px solid rgba(239,68,68,0.3); transition: background 0.2s;"
+                    onmouseenter="this.style.background='rgba(239,68,68,0.25)'"
+                    onmouseleave="this.style.background='rgba(239,68,68,0.15)'">🚪 Logout</button>
+            </div>
         </div>
     </div>
 

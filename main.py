@@ -20,7 +20,6 @@ from jose import JWTError, jwt
 
 # Import our modules
 import scraper
-import tweet_scraper
 import ai_agent
 import poster
 import utils
@@ -211,6 +210,91 @@ async def read_users_me(current_user: dict = Depends(get_current_user)):
         "id": current_user["id"],
         "credits": current_user.get("credits", 0)
     }
+
+# --- Twitter OAuth 2.0 PKCE Flow ---
+
+# In-memory store for code_verifier mapped by state (dict: state -> code_verifier)
+oauth_states = {}
+
+@app.get("/api/auth/twitter/login")
+async def twitter_login(request: Request, current_user: dict = Depends(get_current_user)):
+    """Generate the OAuth 2.0 Authorization URL for the user."""
+    import tweepy
+    import secrets
+    
+    if not config.TWITTER_CLIENT_ID or not config.TWITTER_CLIENT_SECRET:
+        raise HTTPException(status_code=500, detail="Twitter Client ID and Secret not configured")
+        
+    oauth2_user_handler = tweepy.OAuth2UserHandler(
+        client_id=config.TWITTER_CLIENT_ID,
+        redirect_uri=config.OAUTH_CALLBACK_URL,
+        scope=["tweet.read", "tweet.write", "users.read", "offline.access"],
+        client_secret=config.TWITTER_CLIENT_SECRET
+    )
+
+    auth_url = oauth2_user_handler.get_authorization_url()
+    
+    # Extract state parameter from auth_url
+    from urllib.parse import urlparse, parse_qs
+    parsed_url = urlparse(auth_url)
+    state = parse_qs(parsed_url.query).get('state', [None])[0]
+    
+    if state:
+        # Save code_verifier mapped to state, along with user_id
+        oauth_states[state] = {
+            "code_verifier": oauth2_user_handler._code_verifier,
+            "user_id": current_user["id"]
+        }
+        
+    return {"url": auth_url}
+
+from fastapi.responses import HTMLResponse
+
+@app.get("/api/auth/twitter/callback")
+async def twitter_callback(request: Request, state: str, code: str):
+    """Handle the OAuth 2.0 callback from Twitter."""
+    import tweepy
+    
+    if state not in oauth_states:
+        return HTMLResponse("<html><body><h3>Error: Invalid state. Please try logging in again.</h3></body></html>", status_code=400)
+        
+    state_data = oauth_states.pop(state)
+    user_id = state_data["user_id"]
+    code_verifier = state_data["code_verifier"]
+
+    try:
+        oauth2_user_handler = tweepy.OAuth2UserHandler(
+            client_id=config.TWITTER_CLIENT_ID,
+            redirect_uri=config.OAUTH_CALLBACK_URL,
+            scope=["tweet.read", "tweet.write", "users.read", "offline.access"],
+            client_secret=config.TWITTER_CLIENT_SECRET
+        )
+        
+        # We must restore the code_verifier we saved earlier
+        oauth2_user_handler._code_verifier = code_verifier
+        
+        # This exchanges the code for the access token
+        access_token = oauth2_user_handler.fetch_token(
+            f"{config.OAUTH_CALLBACK_URL}?state={state}&code={code}"
+        )
+        
+        # Save to user settings
+        creds = {
+            "oauth2": True,
+            "access_token": access_token.get("access_token"),
+            "refresh_token": access_token.get("refresh_token"),
+            "expires_at": access_token.get("expires_at")
+        }
+        utils.save_setting("posting_credentials", creds, user_id=user_id)
+        utils.add_log("Successfully connected Twitter account via OAuth 2.0", user_id=user_id)
+        
+        # Redirect back to the frontend settings page
+        return HTMLResponse(
+            "<html><body><script>window.location.href = '/?view=settings';</script></body></html>"
+        )
+    except Exception as e:
+        logger.error(f"OAuth Callback Error: {e}")
+        return HTMLResponse(f"<html><body><h3>Error connecting Twitter account: {e}</h3></body></html>", status_code=500)
 
 # Data Models with Validation
 class ScrapeRequest(BaseModel):
@@ -456,59 +540,7 @@ async def mark_done(request: Request, post_req: PostRequest, current_user: dict 
             pass
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-@app.post("/api/post")
-@limiter.limit("50/day")
-async def post_reply(request: Request, post_req: PostRequest, current_user: dict = Depends(get_current_user)):
-    """Post a reply to Twitter."""
-    try:
-        # 1. Validate
-        if not post_req.reply_text or not post_req.reply_text.strip():
-            raise HTTPException(status_code=400, detail="Reply text cannot be empty")
 
-        msg = f"Posting reply to ID: {post_req.reply_to_id}"
-        logger.info(msg)
-        utils.add_log(msg, user_id=current_user['id'])
-        
-        # 2. Post to Twitter (using poster.py)
-        # Run in thread pool to avoid blocking
-        result = await asyncio.to_thread(
-            poster.post_reply, 
-            post_req.reply_text, 
-            post_req.reply_to_id,
-            user_id=current_user['id']
-        )
-        
-        if "Error" in result or "RATE_LIMIT" in result:
-            logger.error(f"Posting failed: {result}")
-            utils.add_log(f"Posting failed: {result}", "ERROR", user_id=current_user['id'])
-            
-            if "RATE_LIMIT" in result:
-                 raise HTTPException(status_code=429, detail="Twitter API rate limit exceeded")
-            raise HTTPException(status_code=400, detail=result)
-            
-        # 3. Success - Add to history
-        utils.add_log(f"Successfully posted to {post_req.reply_to_id}", "SUCCESS", user_id=current_user['id'])
-        
-        utils.add_history(
-            tweet_id=post_req.reply_to_id, 
-            reply_text=post_req.reply_text, 
-            status="posted", 
-            user_id=current_user['id'],
-            tweet_text=post_req.tweet_text
-        )
-        
-        # 4. Increment stats
-        utils.increment_reply_count(user_id=current_user['id'])
-        
-        return {"status": "success", "message": result}
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        err_msg = f"Error posting reply: {str(e)}"
-        logger.error(err_msg)
-        utils.add_log(err_msg, "ERROR", user_id=current_user['id'])
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/generate")
 @limiter.limit("15/minute")
@@ -653,7 +685,7 @@ class BatchManager:
         
         # Credit Check (Estimate)
         credits = utils.get_user_credits(user_id)
-        cost_per_tweet = 4
+        cost_per_tweet = 5
         if credits < cost_per_tweet:
              raise HTTPException(status_code=402, detail=f"Insufficient credits. You need at least {cost_per_tweet} credits to start.")
 
@@ -731,13 +763,22 @@ class BatchManager:
                         if session.should_stop: break
                         
                         # 0. Check Cooldown
-                        if session.api_cooldown_until:
-                            if datetime.now() < session.api_cooldown_until:
-                                utils.add_log(f"📉 API in cooldown. Skipping API attempt and going straight to Fallback...", "INFO", user_id=session.user_id)
-                                break # Skip API, go to fallback
-                            else:
+                        if getattr(session, 'api_cooldown_until', None):
+                            now = datetime.now()
+                            if now < session.api_cooldown_until:
+                                sleep_seconds = (session.api_cooldown_until - now).total_seconds()
+                                utils.add_log(f"📉 API rate limited. Pausing processing for {int(sleep_seconds // 60)} minutes...", "WARNING", user_id=session.user_id)
+                                
+                                # Sleep in smaller chunks so we can check if user stopped the batch
+                                while datetime.now() < session.api_cooldown_until:
+                                    if session.should_stop: break
+                                    await asyncio.sleep(5)
+                                    
+                            if not session.should_stop:
                                 session.api_cooldown_until = None # Cooldown expired
                                 utils.add_log(f"🟢 API cooldown expired. Resuming API attempts.", "INFO", user_id=session.user_id)
+                                
+                        if session.should_stop: break
 
                         # Current scraper.get_tweets_batch is synchronous, run in thread
                         scraped_data = await asyncio.to_thread(
@@ -749,19 +790,20 @@ class BatchManager:
                         
                         # Check if all accounts failed (Rate Limit or Auth Error)
                         if scraped_data.get("_all_failed"):
-                            # Logic: If all failed, we trigger cooldown and fallback IMMEDIATELY
-                            cooldown_mins = 15
-                            session.api_cooldown_until = datetime.now() + timedelta(minutes=cooldown_mins)
-                            
-                            utils.add_log(
-                                f"🛑 All API keys exhausted (Rate Limit/Auth). Entering {cooldown_mins}m background cooldown.", 
-                                "WARNING", 
-                                user_id=session.user_id
-                            )
-                            utils.add_log(f"🔄 Switching to Web Scraper Fallback immediately...", "INFO", user_id=session.user_id)
-                            
-                            scraped_data = {} # Clear error flags
-                            break # Exit retry loop, proceed to fallback
+                            if retry_attempt < max_rate_limit_retries:
+                                cooldown_mins = 15
+                                session.api_cooldown_until = datetime.now() + timedelta(minutes=cooldown_mins)
+                                utils.add_log(
+                                    f"🛑 All API keys exhausted. Initiating {cooldown_mins}m background cooldown before retry...", 
+                                    "WARNING", 
+                                    user_id=session.user_id
+                                )
+                                scraped_data = {} # Clear error flags
+                                continue # Go to next retry attempt, which handles the sleep
+                            else:
+                                utils.add_log(f"🛑 Max retries reached after cooldowns. Skipping these tweets.", "ERROR", user_id=session.user_id)
+                                scraped_data = {}
+                                break # Exit retry loop
                         else:
                             # Success or normal partial failure
                             break
@@ -769,34 +811,11 @@ class BatchManager:
                     # Remove any metadata keys from scraped_data
                     scraped_data = {k: v for k, v in scraped_data.items() if not k.startswith("_")}
                     
-                    # --- FALLBACK LOGIC ---
-                    # Check what we missed
+                    # Log missing IDs (no fallback anymore)
                     missing_ids = [tid for tid in batch_ids_to_scrape if tid not in scraped_data]
-                    
                     if missing_ids:
-                        utils.add_log(f"⚠️ {len(missing_ids)} tweets missed by API. Attempting Web Scraper Fallback...", "INFO", user_id=session.user_id)
-                        
-                        for m_id in missing_ids:
-                            if session.should_stop: break
-                            
-                            # Use id_to_url map
-                            m_url = id_to_url.get(m_id)
-                            if not m_url: continue
-                                
-                            try:
-                                utils.add_log(f"  🕷️ Web Scraping {m_id}...", "INFO", user_id=session.user_id)
-                                # Run tweet_scraper.scrape_tweet_content async
-                                # Note: It uses Playwright, needs to be awaited
-                                fallback_text = await tweet_scraper.scrape_tweet_content(m_url, user_id=session.user_id)
-                                
-                                if fallback_text:
-                                    scraped_data[m_id] = fallback_text
-                                    utils.add_log(f"  ✅ Web Scrape Success for {m_id}", "SUCCESS", user_id=session.user_id)
-                                else:
-                                    utils.add_log(f"  ❌ Web Scrape Failed for {m_id}", "ERROR", user_id=session.user_id)
-                            except Exception as e:
-                                utils.add_log(f"  ❌ Web Scrape Error for {m_id}: {e}", "ERROR", user_id=session.user_id)
-                    # ----------------------
+                        utils.add_log(f"⚠️ {len(missing_ids)} tweets missed by API. (No fallback available)", "WARNING", user_id=session.user_id)
+
                     
                     # Remove any metadata keys from scraped_data
                     scraped_data = {k: v for k, v in scraped_data.items() if not k.startswith("_")}
@@ -854,10 +873,10 @@ class BatchManager:
                         
                         if reply and "Error" not in reply:
                             # DEDUCT CREDITS
-                            # Cost: 4 credits per successful reply
-                            if utils.deduct_credits(session.user_id, 4):
+                            # Cost: 5 credits per successful reply
+                            if utils.deduct_credits(session.user_id, 5):
                                 utils.add_to_queue(t_id, original_text, reply, user_id=session.user_id)
-                                utils.add_log(f"  ✅ Ready: {t_id} (Credits -4)", "SUCCESS", user_id=session.user_id)
+                                utils.add_log(f"  ✅ Ready: {t_id} (Credits -5)", "SUCCESS", user_id=session.user_id)
                             else:
                                 utils.add_log(f"  ❌ Paused {t_id}: Insufficient credits to finalize.", "ERROR", user_id=session.user_id)
                                 session.should_stop = True # Stop the batch

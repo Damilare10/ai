@@ -26,6 +26,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (usernameEl) {
             usernameEl.innerHTML = 'Guest';
         }
+
+        const profileModalUsernameEl = document.getElementById('profileModalUsername');
+        if (profileModalUsernameEl) {
+            profileModalUsernameEl.textContent = 'Guest';
+        }
     }
 
     // --- PWA INSTALL LOGIC ---
@@ -369,12 +374,25 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (isProcessing) return;
 
+        // Remember original state
+        const originalText = startBatchBtn.textContent;
+        // Give immediate visual feedback that the button was clicked
+        startBatchBtn.textContent = 'Processing...';
+        startBatchBtn.disabled = true;
+
         const rawText = urlInput.value;
         const urlRegex = /(?:https?:\/\/)?(?:www\.)?(?:x|twitter)\.com\/(?:[a-zA-Z0-9_]+\/status\/[0-9]+|intent\/(?:tweet|like)\?[^\s]+)/g;
         const urls = rawText.match(urlRegex) || [];
 
+        // Also allow raw IDs on separate lines
+        const rawIds = rawText.split('\n').map(l => l.trim()).filter(l => /^\d{15,20}$/.test(l));
+        urls.push(...rawIds);
+
         if (urls.length === 0) {
-            log('No valid X/Twitter URLs found.', 'error');
+            log('No valid X/Twitter URLs or IDs found.', 'error');
+            alert('No valid X/Twitter URLs or Tweet IDs found in the input.');
+            startBatchBtn.textContent = originalText;
+            startBatchBtn.disabled = false;
             return;
         }
 
@@ -493,6 +511,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         } catch (e) {
             log(`Error starting batch: ${e.message}`, 'error');
+            alert(`Error starting batch: ${e.message}`);
+        } finally {
+            if (!isProcessing) {
+                // Only reset if we haven't officially entered "processing" state according to pollStatus
+                startBatchBtn.textContent = originalText;
+                startBatchBtn.disabled = false;
+            }
         }
     }
 
@@ -522,13 +547,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
                 <div class="action-group">
                     <button class="btn-sm btn-discard">Discard</button>
-                    <button class="btn-sm btn-approve">Post Reply</button>
                 </div>
             </div>
                 `;
 
         // Bind events
-        const approveBtn = item.querySelector('.btn-approve');
         const discardBtn = item.querySelector('.btn-discard');
         const copyBtn = item.querySelector('.btn-copy');
         const intentBtn = item.querySelector('.btn-intent');
@@ -545,16 +568,6 @@ document.addEventListener('DOMContentLoaded', () => {
             // Use innerText to preserve newlines, fallback to textContent
             return textBox.innerText || textBox.textContent || "";
         };
-
-        // 1. Post Reply
-        approveBtn.addEventListener('click', () => {
-            const text = getCurrentText();
-            if (!text.trim()) {
-                alert("Cannot post empty reply!");
-                return;
-            }
-            postReply(item, tweetId, text);
-        });
 
         // 2. Discard
         discardBtn.addEventListener('click', async () => {
@@ -688,76 +701,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
 
-    async function postReply(itemElement, tweetId, replyText) {
-        const btn = itemElement.querySelector('.btn-approve');
-        btn.disabled = true;
-        btn.textContent = 'Posting...';
-        const tweetText = itemElement.dataset.tweetText || null;
 
-        // FIX: Add to ignore list immediately
-        const queueId = itemElement.dataset.queueId ? parseInt(itemElement.dataset.queueId) : null;
-        if (queueId && typeof locallyDeletedIds !== 'undefined') {
-            locallyDeletedIds.add(queueId);
-        }
-
-        try {
-            const response = await fetchWithAuth('/api/post', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    reply_text: replyText,
-                    reply_to_id: tweetId,
-                    tweet_text: tweetText
-                })
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json();
-                if (response.status === 429) {
-                    throw new Error("Daily posting limit reached (50/day). Try again tomorrow.");
-                }
-                throw new Error(errorData.detail || 'Post failed');
-            }
-
-            // Remove from queue if it has a queueId
-            if (itemElement.dataset.queueId) {
-                try {
-                    await fetchWithAuth(`/api/queue/${itemElement.dataset.queueId}`, { method: 'DELETE' });
-                } catch (e) {
-                    console.error('Failed to remove from queue', e);
-                }
-            }
-
-            log(`Successfully posted reply to ${tweetId} `, 'success');
-            itemElement.remove();
-            updateQueueCount();
-            loadStats(); // Refresh stats
-        } catch (error) {
-            // CHECK FOR MISSING CREDENTIALS ERROR
-            if (error.message.includes("Posting credentials not configured")) {
-                showDevFeatureModal();
-                btn.disabled = false;
-                btn.textContent = 'Post Reply';
-                // Revert ignore list
-                const queueId = itemElement.dataset.queueId ? parseInt(itemElement.dataset.queueId) : null;
-                if (queueId && typeof locallyDeletedIds !== 'undefined') {
-                    locallyDeletedIds.delete(queueId);
-                }
-                return; // Stop here, don't log error
-            }
-
-            log(`Failed to post to ${tweetId}: ${error.message} `, 'error');
-            btn.disabled = false;
-            btn.textContent = 'Post Reply';
-
-            // Revert ignore list if failed
-            // We need to access queueId here, but it's defined in the upper scope now
-            const queueId = itemElement.dataset.queueId ? parseInt(itemElement.dataset.queueId) : null;
-            if (queueId && typeof locallyDeletedIds !== 'undefined') {
-                locallyDeletedIds.delete(queueId);
-            }
-        }
-    }
 
     // --- DEV FEATURE MODAL ---
     const devFeatureModal = document.getElementById('devFeatureModal');
@@ -800,6 +744,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (usernameEl) {
                     // Add a little user icon + the name
                     usernameEl.innerHTML = `👤 ${user.username} `;
+                }
+
+                const profileModalUsernameEl = document.getElementById('profileModalUsername');
+                if (profileModalUsernameEl) {
+                    profileModalUsernameEl.textContent = user.username;
                 }
 
                 // Update Credits
@@ -1017,16 +966,21 @@ document.addEventListener('DOMContentLoaded', () => {
             const res = await fetchWithAuth('/api/settings');
             const settings = await res.json();
 
-            // Posting Credentials
-            if (settings.posting_credentials) {
-                const apiKey = document.getElementById('postApiKey');
-                if (apiKey) apiKey.value = settings.posting_credentials.api_key || '';
-                const apiSecret = document.getElementById('postApiSecret');
-                if (apiSecret) apiSecret.value = settings.posting_credentials.api_secret || '';
-                const accessToken = document.getElementById('postAccessToken');
-                if (accessToken) accessToken.value = settings.posting_credentials.access_token || '';
-                const accessSecret = document.getElementById('postAccessSecret');
-                if (accessSecret) accessSecret.value = settings.posting_credentials.access_secret || '';
+            // Posting Credentials (OAuth 2.0 Status)
+            const oauthStatusText = document.getElementById('oauthStatusText');
+            const connectTwitterBtn = document.getElementById('connectTwitterBtn');
+            const disconnectTwitterBtn = document.getElementById('disconnectTwitterBtn');
+
+            if (settings.posting_credentials && settings.posting_credentials.access_token) {
+                if (oauthStatusText) oauthStatusText.textContent = 'Account Connected';
+                if (oauthStatusText) oauthStatusText.style.color = '#10b981'; // Green
+                if (connectTwitterBtn) connectTwitterBtn.style.display = 'none';
+                if (disconnectTwitterBtn) disconnectTwitterBtn.style.display = 'inline-block';
+            } else {
+                if (oauthStatusText) oauthStatusText.textContent = 'Not Connected to Twitter';
+                if (oauthStatusText) oauthStatusText.style.color = '#94a3b8'; // Gray
+                if (connectTwitterBtn) connectTwitterBtn.style.display = 'inline-flex';
+                if (disconnectTwitterBtn) disconnectTwitterBtn.style.display = 'none';
             }
 
             // Scraping Credentials
@@ -1047,6 +1001,77 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // Connect & Disconnect Handlers
+    const connectTwitterBtn = document.getElementById('connectTwitterBtn');
+    const disconnectTwitterBtn = document.getElementById('disconnectTwitterBtn');
+
+    if (connectTwitterBtn) {
+        connectTwitterBtn.addEventListener('click', async () => {
+            const originalText = connectTwitterBtn.innerHTML;
+            connectTwitterBtn.innerHTML = 'Connecting...';
+            connectTwitterBtn.disabled = true;
+            try {
+                const res = await fetchWithAuth('/api/auth/twitter/login');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.url) {
+                        window.location.href = data.url;
+                    }
+                } else {
+                    showToast("Failed to initialize Twitter Login", "error");
+                    connectTwitterBtn.innerHTML = originalText;
+                    connectTwitterBtn.disabled = false;
+                }
+            } catch (err) {
+                showToast("Network error initiating login", "error");
+                connectTwitterBtn.innerHTML = originalText;
+                connectTwitterBtn.disabled = false;
+            }
+        });
+    }
+
+    if (disconnectTwitterBtn) {
+        disconnectTwitterBtn.addEventListener('click', async () => {
+            // To disconnect, we simply send empty posting_credentials. The rest of the settings logic handles it.
+            disconnectTwitterBtn.textContent = 'Disconnecting...';
+            disconnectTwitterBtn.disabled = true;
+
+            // We need to fetch current scraping creds to not overwrite them
+            let scrapingCreds = [];
+            document.querySelectorAll('.scraping-account-item').forEach(item => {
+                scrapingCreds.push({
+                    api_key: item.querySelector('.scrape-api-key').value,
+                    api_secret: item.querySelector('.scrape-api-secret').value,
+                    access_token: item.querySelector('.scrape-access-token').value,
+                    access_secret: item.querySelector('.scrape-access-secret').value,
+                    bearer_token: item.querySelector('.scrape-bearer-token').value
+                });
+            });
+
+            try {
+                const res = await fetchWithAuth('/api/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        posting_credentials: {}, // Empty to indicate disconnect
+                        scraping_credentials: scrapingCreds
+                    })
+                });
+                if (res.ok) {
+                    showToast("Twitter Account Disconnected");
+                    loadSettings(); // Reload UI
+                } else {
+                    showToast("Failed to disconnect", "error");
+                }
+            } catch (err) {
+                showToast("Error disconnecting", "error");
+                disconnectTwitterBtn.textContent = 'Disconnect';
+                disconnectTwitterBtn.disabled = false;
+            }
+        });
+    }
+
+
     function addScrapingAccount(data = {}) {
         const div = document.createElement('div');
         div.className = 'scraping-account-item glass-panel';
@@ -1057,28 +1082,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         div.innerHTML = `
             <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
-                <h4>Account Credentials</h4>
+                <h4>TwitterAPI.io Account</h4>
                 <button class="btn-sm btn-secondary remove-account" style="color: var(--error);">Remove</button>
             </div>
             <div class="form-group">
-                <label>API Key</label>
-                <input type="text" class="scrape-api-key" value="${data.api_key || ''}" placeholder="API Key">
-            </div>
-            <div class="form-group">
-                <label>API Secret</label>
-                <input type="password" class="scrape-api-secret" value="${data.api_secret || ''}" placeholder="API Secret">
-            </div>
-            <div class="form-group">
-                <label>Access Token</label>
-                <input type="text" class="scrape-access-token" value="${data.access_token || ''}" placeholder="Access Token">
-            </div>
-            <div class="form-group">
-                <label>Access Secret</label>
-                <input type="password" class="scrape-access-secret" value="${data.access_secret || ''}" placeholder="Access Secret">
-            </div>
-            <div class="form-group">
-                <label>Bearer Token</label>
-                <input type="password" class="scrape-bearer-token" value="${data.bearer_token || ''}" placeholder="Bearer Token (Required for v2)">
+                <label>API Key (from TwitterAPI.io dashboard)</label>
+                <input type="text" class="scrape-api-key" value="${data.api_key || ''}" placeholder="Paste your TwitterAPI.io API Key here">
             </div>
         `;
 
@@ -1093,31 +1102,26 @@ document.addEventListener('DOMContentLoaded', () => {
         saveBtn.disabled = true;
 
         try {
-            // Collect Posting Creds
-            const postingCreds = {
-                api_key: document.getElementById('postApiKey').value,
-                api_secret: document.getElementById('postApiSecret').value,
-                access_token: document.getElementById('postAccessToken').value,
-                access_secret: document.getElementById('postAccessSecret').value
-            };
-
             // Collect Scraping Creds
             const scrapingCreds = [];
             document.querySelectorAll('.scraping-account-item').forEach(item => {
                 scrapingCreds.push({
-                    api_key: item.querySelector('.scrape-api-key').value,
-                    api_secret: item.querySelector('.scrape-api-secret').value,
-                    access_token: item.querySelector('.scrape-access-token').value,
-                    access_secret: item.querySelector('.scrape-access-secret').value,
-                    bearer_token: item.querySelector('.scrape-bearer-token').value
+                    api_key: item.querySelector('.scrape-api-key')?.value || ''
                 });
             });
+
+            // To prevent clearing posting credentials, we need to send the current active token status.
+            // But since our Python backend `api/settings` route completely overwrites settings dict, we must pass it along.
+            // Wait, the new logic: if posting_credentials isn't passed from UI, the backend will overwrite with dict unless updated. 
+            // So we need to fetch currents first or just use the current loaded state.
+            const resInit = await fetchWithAuth('/api/settings');
+            const currentSettings = await resInit.json();
 
             const res = await fetchWithAuth('/api/settings', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    posting_credentials: postingCreds,
+                    posting_credentials: currentSettings.posting_credentials, // KEEP EXISTING
                     scraping_credentials: scrapingCreds
                 })
             });
@@ -1323,6 +1327,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const refreshHistoryBtn = document.getElementById('refreshHistory');
     if (refreshHistoryBtn) {
         refreshHistoryBtn.addEventListener('click', loadHistory);
+    }
+
+    // Profile Modal Logout
+    const profileLogoutBtn = document.getElementById('profileLogoutBtn');
+    if (profileLogoutBtn) {
+        profileLogoutBtn.addEventListener('click', () => {
+            localStorage.removeItem('token');
+            window.location.href = '/login.html';
+        });
     }
 
 });
