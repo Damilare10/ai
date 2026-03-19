@@ -98,4 +98,5 @@ if not SQUAD_API_BASE:
 
 # Log number of accounts loaded for scraping
 print(f"Loaded {len(API_KEYS)} System Twitter API credential set(s).") 
+print(f"DEBUG: ENVIRONMENT='{ENVIRONMENT}', SQUAD_API_BASE='{SQUAD_API_BASE}'")
 print("Note: Individual user credentials will be loaded from the database.")

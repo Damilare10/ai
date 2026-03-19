@@ -1039,6 +1039,7 @@ async def verify_payment(req: VerifyPaymentRequest, current_user: dict = Depends
         raise HTTPException(status_code=500, detail="Squad API key not configured")
         
     try:
+        logger.info(f"DEBUG: Using SQUAD_API_BASE='{config.SQUAD_API_BASE}'")
         url = f"{config.SQUAD_API_BASE}/transaction/verify/{req.reference}"
         headers = {
             "Authorization": f"Bearer {config.SQUAD_SECRET_KEY.strip()}",
