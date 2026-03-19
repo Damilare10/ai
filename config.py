@@ -94,7 +94,7 @@ SQUAD_SECRET_KEY = os.getenv("SQUAD_SECRET_KEY")
 
 SQUAD_API_BASE = os.getenv("SQUAD_API_BASE")
 if not SQUAD_API_BASE:
-    SQUAD_API_BASE = "https://sandbox-api-d.squadco.com" if ENVIRONMENT == "development" else "https://api.squadco.com"
+    SQUAD_API_BASE = "https://sandbox-api-d.squadco.com" if ENVIRONMENT == "development" else "https://api-d.squadco.com"
 
 # Log number of accounts loaded for scraping
 print(f"Loaded {len(API_KEYS)} System Twitter API credential set(s).") 
