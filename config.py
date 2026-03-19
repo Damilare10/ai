@@ -6,8 +6,8 @@ Create a .env file based on .env.example and populate with your actual credentia
 import os
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
+# Load environment variables from .env file with override
+load_dotenv(override=True)
 
 # TWITTER OFFICIAL API - Multi-Account Support
 # Load credentials for up to 11 accounts for rotation
