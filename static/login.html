@@ -258,7 +258,7 @@
                 <div class="password-wrapper">
                     <input type="password" id="password" name="password" required autocomplete="current-password">
                     <button type="button" class="password-toggle" id="toggle-password">
-                        <span id="eye-icon">👁️</span>
+                        <span id="eye-icon" style="font-size: 0.8rem; font-weight: 500;">Show</span>
                     </button>
                 </div>
             </div>
@@ -267,6 +267,10 @@
                 <div class="password-wrapper">
                     <input type="password" id="confirm-password" name="confirm-password" autocomplete="new-password">
                 </div>
+            </div>
+            <div class="form-group" id="referral-code-group" style="display: none;">
+                <label for="referral-code">Referral Code (Optional)</label>
+                <input type="text" id="referral-code" name="referral-code" placeholder="Enter referral code if you have one">
             </div>
             <button type="submit" id="submit-btn">Login</button>
         </form>
@@ -290,12 +294,20 @@
         const eyeIcon = document.getElementById('eye-icon');
         const confirmGroup = document.getElementById('confirm-password-group');
         const confirmInput = document.getElementById('confirm-password');
+        const referralGroup = document.getElementById('referral-code-group');
+        const referralInput = document.getElementById('referral-code');
 
         let isLogin = true;
 
         // Auto-switch to register mode if ?mode=register is in the URL
         const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('mode') === 'register') {
+        const urlRefCode = urlParams.get('ref');
+
+        if (urlRefCode) {
+            referralInput.value = urlRefCode;
+        }
+
+        if (urlParams.get('mode') === 'register' || urlRefCode) {
             isLogin = false;
             title.textContent = 'Create Account';
             submitBtn.textContent = 'Sign Up';
@@ -303,6 +315,7 @@
             toggleBtn.textContent = 'Login';
             confirmGroup.style.display = 'block';
             confirmInput.required = true;
+            referralGroup.style.display = 'block';
         }
 
         // Password visibility toggle
@@ -313,7 +326,7 @@
             if (confirmInput) {
                 confirmInput.setAttribute('type', type);
             }
-            eyeIcon.textContent = type === 'password' ? '👁️' : '🙈';
+            eyeIcon.textContent = type === 'password' ? 'Show' : 'Hide';
         });
 
         toggleBtn.addEventListener('click', () => {
@@ -325,10 +338,14 @@
             errorMsg.style.display = 'none';
             successMsg.style.display = 'none';
 
-            // Toggle confirm password
+            // Toggle confirm password and referral code
             confirmGroup.style.display = isLogin ? 'none' : 'block';
+            referralGroup.style.display = isLogin ? 'none' : 'block';
             confirmInput.required = !isLogin;
-            if (isLogin) confirmInput.value = '';
+            if (isLogin) {
+                confirmInput.value = '';
+                // Don't clear referral code on toggle in case they want to sign up later
+            }
         });
 
         form.addEventListener('submit', async (e) => {
@@ -363,7 +380,16 @@
                     body.append('password', password);
                     headers['Content-Type'] = 'application/x-www-form-urlencoded';
                 } else {
-                    body = JSON.stringify({ username, password });
+                    const payload = { username, password };
+                    
+                    // Use manually entered referral code, fallback to URL parameter if empty
+                    const manualRefCode = referralInput.value.trim();
+                    const finalRefCode = manualRefCode || urlRefCode;
+
+                    if (finalRefCode) {
+                        payload.ref = finalRefCode;
+                    }
+                    body = JSON.stringify(payload);
                     headers['Content-Type'] = 'application/json';
                 }
 

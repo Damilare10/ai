@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Smart Reply Dashboard</title>
-    <link rel="stylesheet" href="dashboard.css?v=4">
+    <link rel="stylesheet" href="dashboard.css?v=5">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#0f172a">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -18,6 +18,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://checkout.squadco.com/widget/squad.min.js"></script>
 </head>
 
 <body>
@@ -29,16 +30,22 @@
             </div>
             <nav>
                 <a href="#" class="nav-item active" data-view="dashboard-view">
-                    <span>📊</span> Dashboard
+                    Dashboard
                 </a>
                 <a href="#" class="nav-item" data-view="history-view">
-                    <span>🕒</span> History
+                    History
+                </a>
+                <a href="#" class="nav-item" data-view="referrals-view">
+                    Referrals
+                </a>
+                <a href="#" class="nav-item" data-view="recharge-view">
+                    Recharge
                 </a>
                 <a href="#" id="adminStatusLink" class="nav-item" data-view="admin-status-view" style="display: none;">
-                    <span>📈</span> Status
+                    Status
                 </a>
                 <a href="#" id="installAppBtn" class="nav-item" style="display: none;">
-                    <span>⬇️</span> Install App
+                    Install App
                 </a>
             </nav>
 
@@ -58,10 +65,10 @@
         <!-- Main Content -->
         <main class="main-content">
             <div class="top-bar">
-                <div style="display: flex; align-items: center;">
+                <div style="display: flex; align-items: center; width: 100%;">
                     <button id="sidebarToggle" class="icon-btn"
-                        style="background: none; border: none; cursor: pointer; font-size: 1.5rem; color: #fff; padding: 8px; margin-right: 1rem;">☰</button>
-                    <h1 id="pageTitle">Dashboard</h1>
+                        style="background: none; border: none; cursor: pointer; font-size: 1rem; color: #fff; padding: 8px; margin-right: 1rem; font-weight: 500; display: none;">Menu</button>
+                    <h1 id="pageTitle" style="margin: 0;">Dashboard</h1>
                 </div>
                 <div style="display: flex; gap: 10px; align-items: center;">
                     <div id="creditsDisplay" class="status-indicator"
@@ -113,7 +120,7 @@
                         <div class="glass-panel console-panel">
                             <div class="panel-header">
                                 <h2>System Console</h2>
-                                <button id="clearConsole" class="icon-btn">🗑️</button>
+                                <button id="clearConsole" class="icon-btn">Clear</button>
                             </div>
                             <div id="consoleLog" class="console-log">
                                 <div class="log-entry info">System initialized...</div>
@@ -139,10 +146,119 @@
                 <div class="glass-panel">
                     <div class="panel-header">
                         <h2>Reply History</h2>
-                        <button id="refreshHistory" class="icon-btn">🔄</button>
+                        <button id="refreshHistory" class="icon-btn">Refresh</button>
                     </div>
                     <div id="historyList" class="review-list">
                         <div class="empty-state">Loading history...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Referrals View -->
+            <div id="referrals-view" class="view-section" style="display: none;">
+                <div class="glass-panel">
+                    <div class="panel-header">
+                        <h2>Your Referrals</h2>
+                        <button id="refreshReferrals" class="icon-btn">Refresh</button>
+                    </div>
+                    <div
+                        style="margin-top: 1.5rem; background: rgba(0,0,0,0.2); padding: 1.5rem; border-radius: 12px; border: 1px dashed rgba(255,255,255,0.2); display: flex; align-items: center; justify-content: space-between;">
+                        <h3 style="margin: 0; color: #60a5fa;">Total Referrals</h3>
+                        <div id="totalReferralsCount" style="font-size: 2rem; font-weight: 700; color: #10b981;">0</div>
+                    </div>
+
+                    <div
+                        style="margin-top: 1rem; background: rgba(0,0,0,0.2); padding: 1.5rem; border-radius: 12px; border: 1px dashed rgba(255,255,255,0.2);">
+                        <h3 style="margin-top: 0; color: #60a5fa;">Your Referral Link</h3>
+                        <div style="display: flex; gap: 10px; margin-top: 1rem;">
+                            <input type="text" id="referralLinkInput" readonly
+                                style="flex: 1; padding: 0.75rem; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #fff; border-radius: 8px;">
+                            <button id="copyReferralLinkBtn" class="primary-btn">Copy Link</button>
+                        </div>
+                    </div>
+
+                    <h3 style="margin-top: 2rem;">Referred Users</h3>
+                    <div class="table-container" style="overflow-x: auto; margin-top: 1rem;">
+                        <table style="width: 100%; border-collapse: collapse; color: #fff;">
+                            <thead>
+                                <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
+                                    <th style="text-align: left; padding: 12px;">User</th>
+                                    <th style="text-align: right; padding: 12px;">Joined Date</th>
+                                </tr>
+                            </thead>
+                            <tbody id="referralsListBody">
+                                <tr>
+                                    <td colspan="2" style="text-align: center; padding: 12px; color: #94a3b8;">Loading
+                                        referrals...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recharge View -->
+            <div id="recharge-view" class="view-section" style="display: none;">
+                <div class="glass-panel">
+                    <div class="panel-header">
+                        <h2>Recharge Credits</h2>
+                    </div>
+                    <p style="color: #94a3b8; margin-bottom: 2rem;">Purchase more credits to continue using Smart Reply.
+                    </p>
+
+                    <div class="recharge-cards" style="display: flex; gap: 2rem; justify-content: center; flex-wrap: wrap;">
+                        <!-- Standard Pro Package -->
+                        <div
+                            style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 2rem; width: 100%; max-width: 350px; text-align: center; position: relative; overflow: hidden;">
+                            <div
+                                style="position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #3b82f6, #8b5cf6);">
+                            </div>
+                            <h3 style="font-size: 1.5rem; margin-top: 0;">Pro Package</h3>
+                            <div style="font-size: 2.5rem; font-weight: 700; color: #fff; margin: 1rem 0;">15,000<span
+                                    style="font-size: 1rem; color: #94a3b8; font-weight: normal;"> credits</span></div>
+                            <div style="font-size: 1.2rem; color: #10b981; margin-bottom: 2rem;">₦4,000 NGN</div>
+
+                            <ul
+                                style="list-style: none; padding: 0; margin: 0 0 2rem 0; text-align: left; color: #cbd5e1;">
+                                <li style="margin-bottom: 0.5rem;">Instant credit delivery</li>
+                                <li style="margin-bottom: 0.5rem;">Discounted</li>
+                                <li style="margin-bottom: 0.5rem;">Secure Squad checkout</li>
+                            </ul>
+
+                            <button id="squadCheckoutBtn"
+                                style="width: 100%; padding: 1rem; border-radius: 8px; border: none; background: #0ea5e9; color: white; font-weight: 600; font-size: 1.1rem; cursor: pointer; transition: background 0.2s;">
+                                Pay ₦4,000
+                            </button>
+                        </div>
+                        
+                        <!-- Custom Amount Package -->
+                        <div
+                            style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; padding: 2rem; width: 100%; max-width: 350px; text-align: center; position: relative; overflow: hidden;">
+                            <div
+                                style="position: absolute; top: 0; left: 0; right: 0; height: 4px; background: linear-gradient(90deg, #10b981, #0ea5e9);">
+                            </div>
+                            <h3 style="font-size: 1.5rem; margin-top: 0;">Custom Amount</h3>
+                            
+                            <div style="margin: 1.5rem 0;">
+                                <label style="display: block; color: #94a3b8; font-size: 0.9rem; margin-bottom: 0.5rem; text-align: left;">Enter Credits to Buy:</label>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    <button id="decrementCredits" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #fff; width: 40px; height: 40px; border-radius: 8px; cursor: pointer; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; transition: background 0.2s;" onmouseenter="this.style.background='rgba(255,255,255,0.1)'" onmouseleave="this.style.background='rgba(255,255,255,0.05)'">-</button>
+                                    <input type="number" id="customCreditsInput" placeholder="Min: 300" min="300" value="300"
+                                        style="flex: 1; padding: 0.75rem; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.2); color: #fff; border-radius: 8px; font-size: 1.2rem; text-align: center; -moz-appearance: textfield; appearance: textfield;">
+                                    <button id="incrementCredits" style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); color: #fff; width: 40px; height: 40px; border-radius: 8px; cursor: pointer; font-size: 1.2rem; display: flex; align-items: center; justify-content: center; transition: background 0.2s;" onmouseenter="this.style.background='rgba(255,255,255,0.1)'" onmouseleave="this.style.background='rgba(255,255,255,0.05)'">+</button>
+                                </div>
+                            </div>
+                            
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 2rem; padding: 1rem; background: rgba(0,0,0,0.2); border-radius: 8px;">
+                                <span style="color: #94a3b8;">Total Price:</span>
+                                <span id="customNgnDisplay" style="font-size: 1.2rem; color: #10b981; font-weight: bold;">₦100 NGN</span>
+                            </div>
+
+                            <button id="customSquadBtn"
+                                style="width: 100%; padding: 1rem; border-radius: 8px; border: none; background: #10b981; color: white; font-weight: 600; font-size: 1.1rem; cursor: pointer; transition: background 0.2s;">
+                                Pay Custom Amount
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -152,7 +268,7 @@
                 <div class="glass-panel">
                     <div class="panel-header">
                         <h2>System Usage Status</h2>
-                        <button id="refreshAdminStats" class="icon-btn">🔄</button>
+                        <button id="refreshAdminStats" class="icon-btn">Refresh</button>
                     </div>
                     <div class="table-container" style="overflow-x: auto; margin-top: 1rem;">
                         <table id="adminStatsTable" style="width: 100%; border-collapse: collapse; color: #fff;">
@@ -186,11 +302,9 @@
                 </div>
             </div>
 
-
-        </main>
         </main>
         <div class="watermark">
-            Made by <a href="https://t.me/Web3kaijun" target="_blank">Kaiju</a> (v14)
+            Made by <a href="https://t.me/Web3kaijun" target="_blank">Kaiju</a> (v15)
         </div>
     </div>
 
@@ -200,21 +314,19 @@
         onclick="if(event.target===this)this.style.display='none'">
         <div
             style="background: rgba(255, 255, 255, 0.03); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.12); border-radius: 20px; padding: 2rem; width: 320px; text-align: center; box-shadow: 0 25px 60px rgba(0,0,0,0.6); animation: fadeInScale 0.2s ease;">
-            <div style="font-size: 3rem; margin-bottom: 0.5rem;">👤</div>
-            <div style="font-size: 0.8rem; color: #64748b; margin-bottom: 4px;">Signed in as</div>
             <div id="profileModalUsername"
                 style="font-size: 1.2rem; font-weight: 700; color: #fff; margin-bottom: 1.5rem;">...</div>
             <div style="display: flex; flex-direction: column; gap: 0.75rem;">
                 <a href="https://t.me/telemtsa" target="_blank" style="text-decoration: none;">
                     <button
                         style="width: 100%; padding: 0.75rem; border-radius: 12px; border: none; background: linear-gradient(135deg, #229ed9, #0088cc); color: white; font-size: 0.95rem; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: opacity 0.2s;"
-                        onmouseenter="this.style.opacity='0.85'" onmouseleave="this.style.opacity='1'">✈️ Join Telegram
+                        onmouseenter="this.style.opacity='0.85'" onmouseleave="this.style.opacity='1'">Join Telegram
                         Community</button>
                 </a>
                 <button id="profileLogoutBtn"
                     style="width: 100%; padding: 0.75rem; border-radius: 12px; border: none; background: rgba(239,68,68,0.15); color: #ef4444; font-size: 0.95rem; font-weight: 600; cursor: pointer; border: 1px solid rgba(239,68,68,0.3); transition: background 0.2s;"
                     onmouseenter="this.style.background='rgba(239,68,68,0.25)'"
-                    onmouseleave="this.style.background='rgba(239,68,68,0.15)'">🚪 Logout</button>
+                    onmouseleave="this.style.background='rgba(239,68,68,0.15)'">Logout</button>
             </div>
         </div>
     </div>
@@ -223,7 +335,7 @@
     <div id="intentModal" class="modal">
         <div class="modal-content glass-panel">
             <span class="modal-close">&times;</span>
-            <h3 style="margin-top: 0; color: #3b82f6;">🐦 Twitter Opened</h3>
+            <h3 style="margin-top: 0; color: #3b82f6;">Twitter Opened</h3>
             <div style="margin: 1rem 0;">
                 <p style="color: #94a3b8; margin: 0.5rem 0;"><strong>Tweet ID:</strong> <span id="modalTweetId"></span>
                 </p>
@@ -239,7 +351,7 @@
                 you post your reply, click confirm below to mark it as done.</p>
             <div style="display: flex; gap: 0.5rem; justify-content: flex-end; margin-top: 1.5rem;">
                 <button id="modalCancel" class="btn-sm btn-secondary">Cancel</button>
-                <button id="modalConfirm" class="btn-sm" style="background: #10b981;">✅ Confirm Posted</button>
+                <button id="modalConfirm" class="btn-sm" style="background: #10b981;">Confirm Posted</button>
             </div>
         </div>
     </div>
@@ -248,7 +360,7 @@
     <div id="creditModal" class="modal">
         <div class="modal-content glass-panel" style="max-width: 400px;">
             <span class="modal-close" id="creditModalClose">&times;</span>
-            <h3 style="margin-top: 0; color: #10b981;">💰 Confirm Add Credits</h3>
+            <h3 style="margin-top: 0; color: #10b981;">Confirm Add Credits</h3>
             <div style="margin: 1.5rem 0; text-align: center;">
                 <p style="color: #cbd5e1; margin-bottom: 0.5rem;">Add credits to:</p>
                 <h2 id="modalCreditUser" style="margin: 0; color: #fff;"></h2>
@@ -262,33 +374,49 @@
                 <button id="creditModalConfirm" class="btn-sm" style="background: #10b981;">Confirm & Add</button>
             </div>
         </div>
-        <div id="devFeatureModal" class="modal">
-            <div class="modal-content glass-panel" style="max-width: 450px; text-align: center;">
-                <span class="modal-close" id="devFeatureModalClose">&times;</span>
-                <div style="font-size: 3rem; margin-bottom: 1rem;">🚧</div>
-                <h3 style="margin-top: 0; color: #f59e0b;">Feature Under Development</h3>
-                <p style="color: #cbd5e1; margin: 1.5rem 0; line-height: 1.6;">
-                    This automatic posting feature requires linked credentials.
-                    <br><br>
-                    If you don't have them, please contact the admin for <strong>bypass credentials</strong>.
-                </p>
-                <button id="devFeatureModalOk" class="primary-btn" style="width: 100%;">Got it</button>
-            </div>
+    </div> <!-- Correctly closed creditModal -->
+
+    <div id="devFeatureModal" class="modal">
+        <div class="modal-content glass-panel" style="max-width: 450px; text-align: center;">
+            <span class="modal-close" id="devFeatureModalClose">&times;</span>
+            <h3 style="margin-top: 0; color: #f59e0b;">Feature Under Development</h3>
+            <p style="color: #cbd5e1; margin: 1.5rem 0; line-height: 1.6;">
+                This automatic posting feature requires linked credentials.
+                <br><br>
+                If you don't have them, please contact the admin for <strong>bypass credentials</strong>.
+            </p>
+            <button id="devFeatureModalOk" class="primary-btn" style="width: 100%;">Got it</button>
         </div>
+    </div> <!-- Correctly closed devFeatureModal -->
 
-        <div id="toastContainer" class="toast-container"></div>
-        <script src="dashboard.js?v=14"></script>
-        <script>
-            // NUCLEAR OPTION: Unregister Service Worker to allow updates
-            if ('serviceWorker' in navigator) {
-                navigator.serviceWorker.getRegistrations().then(function (registrations) {
-                    for (let registration of registrations) {
-                        registration.unregister();
-                        console.log('Service Worker Unregistered (Force Update)');
-                    }
-                });
-            }
-        </script>
+    <!-- Payment Success Modal -->
+    <div id="paymentSuccessModal" class="modal">
+        <div class="modal-content glass-panel" style="max-width: 400px; text-align: center; border: 1px solid rgba(16, 185, 129, 0.3);">
+            <div style="font-size: 4rem; margin-bottom: 1rem;">🎉</div>
+            <h2 style="margin-top: 0; color: #10b981;">Payment Successful!</h2>
+            <p style="color: #cbd5e1; margin: 1rem 0;">Successfully added credits to your account.</p>
+            <div style="background: rgba(16, 185, 129, 0.1); padding: 1.5rem; border-radius: 12px; margin: 1.5rem 0; border: 1px solid rgba(16, 185, 129, 0.2);">
+                <span style="display: block; color: #94a3b8; font-size: 0.9rem; margin-bottom: 0.5rem;">Credits Added</span>
+                <span id="successModalCredits" style="font-size: 2.5rem; font-weight: 700; color: #10b981;">+0 credits</span>
+            </div>
+            <button id="successModalOk" class="primary-btn" style="width: 100%; height: 50px; font-size: 1.1rem; background: #10b981;">Great!</button>
+        </div>
+    </div>
+
+    <div id="toastContainer" class="toast-container"></div>
+    
+
+    <script src="dashboard.js?v=31"></script>
+    <script>
+        // NUCLEAR OPTION: Unregister Service Worker to allow updates
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.getRegistrations().then(function (registrations) {
+                for (let registration of registrations) {
+                    registration.unregister();
+                    console.log('Service Worker Unregistered (Force Update)');
+                }
+            });
+        }
+    </script>
 </body>
-
 </html>

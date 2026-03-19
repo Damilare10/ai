@@ -23,6 +23,7 @@ import scraper
 import ai_agent
 import poster
 import utils
+import config
 import httpx
 
 # Configure comprehensive logging
@@ -45,8 +46,12 @@ async def lifespan(app: FastAPI):
     utils.init_pool() # Initialize the pool
     utils.init_db()
     yield
-    # Close pool on shutdown if you want to be clean
-    if utils.pg_pool: utils.pg_pool.closeall()
+    # Close pool on shutdown
+    if utils.pg_pool:
+        try:
+            utils.pg_pool.close(timeout=5)
+        except Exception as e:
+            logger.warning(f"Error closing pool: {e}")
 
 app = FastAPI(title="AI Reply Agent", lifespan=lifespan)
 
@@ -101,6 +106,7 @@ class User(BaseModel):
 class UserCreate(BaseModel):
     username: str
     password: str
+    ref: Optional[str] = None
 
     @validator('password')
     def validate_password(cls, v):
@@ -159,19 +165,20 @@ app.add_middleware(
 @app.post("/api/auth/signup", response_model=Token)
 async def signup(user: UserCreate):
     try:
+        # 0. Check if username exists
         db_user = utils.get_user(user.username)
         if db_user:
             raise HTTPException(status_code=400, detail="Username already registered")
-            
-        # Debug logging
-        print(f"DEBUG: Signup request for user '{user.username}'")
-        print(f"DEBUG: Password received: '{user.password}'")
-        print(f"DEBUG: Password length: {len(user.password)}")
-        print(f"DEBUG: Password bytes: {len(user.password.encode('utf-8'))}")
-        import passlib
-        print(f"DEBUG: passlib version: {passlib.__version__}")
 
-        utils.create_user(user.username, user.password)
+        # 1. Handle referral
+        referred_by_id = None
+        if user.ref:
+            referred_by_user = utils.get_user_by_referral_code(user.ref)
+            if referred_by_user:
+                referred_by_id = referred_by_user['id']
+                logger.info(f"User {user.username} referred by {referred_by_user['username']} ({referred_by_id})")
+
+        utils.create_user(user.username, user.password, referred_by=referred_by_id)
         access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = create_access_token(
             data={"sub": user.username}, expires_delta=access_token_expires
@@ -343,6 +350,29 @@ class PostRequest(BaseModel):
         if len(v) > 280:
             raise ValueError('Reply text exceeds 280 characters')
         return v
+
+@app.get("/api/user/referrals")
+async def get_user_referrals(current_user: dict = Depends(get_current_user)):
+    """Get the current user's referral code and list of referrals."""
+    try:
+        # Safety check: if code is missing for old user, generate one on the fly
+        ref_code = current_user.get("referral_code")
+        if not ref_code:
+            ref_code = utils.generate_referral_code()
+            with utils.get_db_connection() as conn:
+                c = conn.cursor()
+                ph = utils.get_placeholder()
+                c.execute(f"UPDATE users SET referral_code = {ph} WHERE id = {ph}", (ref_code, current_user['id']))
+            logger.info(f"Generated missing referral code for user {current_user['username']}")
+
+        referrals = utils.get_user_referrals(current_user['id'])
+        return {
+            "referral_code": ref_code,
+            "referrals": referrals
+        }
+    except Exception as e:
+        logger.error(f"Error getting referrals: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve referrals")
 
 @app.get("/api/logs")
 @limiter.limit("20/minute")
@@ -718,7 +748,7 @@ class BatchManager:
             for batch_index, chunk_urls in enumerate(chunks):
                 if session.should_stop: break
                 
-                utils.add_log(f"📦 Starting Batch {batch_index + 1}/{len(chunks)} ({len(chunk_urls)} items)", user_id=session.user_id)
+                utils.add_log(f"Starting Batch {batch_index + 1}/{len(chunks)} ({len(chunk_urls)} items)", user_id=session.user_id)
                 
                 # 1. Prepare IDs for this batch
                 batch_ids_to_scrape = [] # Only scrape these
@@ -733,13 +763,13 @@ class BatchManager:
                         t_id = utils.extract_tweet_id(url)
                         # Check History
                         if utils.has_user_processed(session.user_id, t_id):
-                            utils.add_log(f"⏭️ Skipping {t_id}: You have already processed this.", "WARNING", user_id=session.user_id)
+                            utils.add_log(f"Skipping {t_id}: You have already processed this.", "WARNING", user_id=session.user_id)
                             continue
                             
                         # Check Cache
                         cached_text = utils.get_cached_tweet_content(t_id)
                         if cached_text:
-                            utils.add_log(f"⚡ Found {t_id} in Shared Pool! Skipping scrape...", "INFO", user_id=session.user_id)
+                            utils.add_log(f"Found {t_id} in Shared Pool! Skipping scrape...", "INFO", user_id=session.user_id)
                             cached_tweets.append({"id": t_id, "text": cached_text})
                         else:
                             batch_ids_to_scrape.append(t_id)
@@ -767,7 +797,7 @@ class BatchManager:
                             now = datetime.now()
                             if now < session.api_cooldown_until:
                                 sleep_seconds = (session.api_cooldown_until - now).total_seconds()
-                                utils.add_log(f"📉 API rate limited. Pausing processing for {int(sleep_seconds // 60)} minutes...", "WARNING", user_id=session.user_id)
+                                utils.add_log(f"API rate limited. Pausing processing for {int(sleep_seconds // 60)} minutes...", "WARNING", user_id=session.user_id)
                                 
                                 # Sleep in smaller chunks so we can check if user stopped the batch
                                 while datetime.now() < session.api_cooldown_until:
@@ -776,7 +806,7 @@ class BatchManager:
                                     
                             if not session.should_stop:
                                 session.api_cooldown_until = None # Cooldown expired
-                                utils.add_log(f"🟢 API cooldown expired. Resuming API attempts.", "INFO", user_id=session.user_id)
+                                utils.add_log(f"API cooldown expired. Resuming API attempts.", "INFO", user_id=session.user_id)
                                 
                         if session.should_stop: break
 
@@ -794,14 +824,14 @@ class BatchManager:
                                 cooldown_mins = 15
                                 session.api_cooldown_until = datetime.now() + timedelta(minutes=cooldown_mins)
                                 utils.add_log(
-                                    f"🛑 All API keys exhausted. Initiating {cooldown_mins}m background cooldown before retry...", 
+                                    f"All API keys exhausted. Initiating {cooldown_mins}m background cooldown before retry...", 
                                     "WARNING", 
                                     user_id=session.user_id
                                 )
                                 scraped_data = {} # Clear error flags
                                 continue # Go to next retry attempt, which handles the sleep
                             else:
-                                utils.add_log(f"🛑 Max retries reached after cooldowns. Skipping these tweets.", "ERROR", user_id=session.user_id)
+                                utils.add_log(f"Max retries reached after cooldowns. Skipping these tweets.", "ERROR", user_id=session.user_id)
                                 scraped_data = {}
                                 break # Exit retry loop
                         else:
@@ -814,7 +844,7 @@ class BatchManager:
                     # Log missing IDs (no fallback anymore)
                     missing_ids = [tid for tid in batch_ids_to_scrape if tid not in scraped_data]
                     if missing_ids:
-                        utils.add_log(f"⚠️ {len(missing_ids)} tweets missed by API. (No fallback available)", "WARNING", user_id=session.user_id)
+                        utils.add_log(f"{len(missing_ids)} tweets missed by API. (No fallback available)", "WARNING", user_id=session.user_id)
 
                     
                     # Remove any metadata keys from scraped_data
@@ -876,9 +906,9 @@ class BatchManager:
                             # Cost: 5 credits per successful reply
                             if utils.deduct_credits(session.user_id, 5):
                                 utils.add_to_queue(t_id, original_text, reply, user_id=session.user_id)
-                                utils.add_log(f"  ✅ Ready: {t_id} (Credits -5)", "SUCCESS", user_id=session.user_id)
+                                utils.add_log(f"  Ready: {t_id} (Credits -5)", "SUCCESS", user_id=session.user_id)
                             else:
-                                utils.add_log(f"  ❌ Paused {t_id}: Insufficient credits to finalize.", "ERROR", user_id=session.user_id)
+                                utils.add_log(f"  Paused {t_id}: Insufficient credits to finalize.", "ERROR", user_id=session.user_id)
                                 session.should_stop = True # Stop the batch
                                 break # Exit loop
                         else:
@@ -960,18 +990,141 @@ async def stop_batch(current_user: dict = Depends(get_current_user)):
     batch_manager.stop(current_user['id'])
     return {"status": "stopping"}
 
-@app.get("/api/batch/status")
-async def get_batch_status(current_user: dict = Depends(get_current_user)):
-    """Get batch processing status for the current user."""
-    session = batch_manager.sessions.get(current_user['id'])
-    if session:
-        return {
+@app.get("/api/dashboard/summary")
+async def get_dashboard_summary(request: Request, current_user: dict = Depends(get_current_user)):
+    """Unified endpoint for dashboard status, logs, and queue."""
+    try:
+        # 1. Batch Status
+        session = batch_manager.sessions.get(current_user['id'])
+        batch_status = {
             "is_processing": session.is_processing,
             "current_url": session.current_url,
             "current_index": session.current_index,
             "total_urls": session.total_urls
+        } if session else {"is_processing": False}
+        
+        # 2. Recent Logs
+        logs = utils.get_recent_logs(user_id=current_user['id'])
+        
+        # 3. Queue Items
+        queue = utils.get_queue(user_id=current_user['id'])
+        
+        # 4. Credits (for instant header update)
+        credits = utils.get_user_credits(current_user['id'])
+        
+        return {
+            "batch": batch_status,
+            "logs": logs,
+            "queue": queue,
+            "credits": credits
         }
-    return {"is_processing": False}
+    except Exception as e:
+        logger.error(f"Error getting dashboard summary: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve dashboard summary")
+
+class VerifyPaymentRequest(BaseModel):
+    reference: str
+
+@app.get("/api/config/payment")
+async def get_payment_config():
+    """Returns the Paystack public key for the frontend."""
+    return {
+        "squad_public_key": config.SQUAD_PUBLIC_KEY
+    }
+
+@app.post("/api/payment/verify")
+async def verify_payment(req: VerifyPaymentRequest, current_user: dict = Depends(get_current_user)):
+    """Verify a Squad payment and add credits to the user."""
+    if not config.SQUAD_SECRET_KEY:
+        raise HTTPException(status_code=500, detail="Squad API key not configured")
+        
+    try:
+        url = f"{config.SQUAD_API_BASE}/transaction/verify/{req.reference}"
+        headers = {
+            "Authorization": f"Bearer {config.SQUAD_SECRET_KEY.strip()}",
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64 AppleWebKit/537.36)"
+        }
+        utils.add_log(f"Initiating Squad verification for ref: {req.reference}", "INFO", user_id=current_user['id'])
+        
+        @retry(
+            stop=stop_after_attempt(3),
+            wait=wait_exponential(multiplier=1, min=2, max=10),
+            retry=retry_if_exception_type(httpx.RequestError),
+            reraise=True
+        )
+        async def call_squad_api():
+            async with httpx.AsyncClient(http2=False) as client:
+                return await client.get(url, headers=headers, timeout=15.0)
+
+        response = await call_squad_api()
+            
+        logger.info(f"Squad API response for {req.reference}: {response.status_code}")
+        if response.status_code != 200:
+            logger.error(f"Squad Verification Failed. Status: {response.status_code}, Body: {response.text}")
+            raise HTTPException(status_code=400, detail=f"Squad verification failed with status {response.status_code}")
+            
+        data = response.json()
+        tx_data = data.get("data")
+        
+        # DEBUG: Log the actual transaction data to identify missing keys
+        logger.info(f"Squad Transaction Data for {req.reference}: {tx_data}")
+        
+        if not tx_data or tx_data.get("transaction_status", "").lower() != "success":
+            status = tx_data.get("transaction_status") if tx_data else "Unknown"
+            raise HTTPException(status_code=400, detail=f"Payment status is: {status}")
+            
+        # Success! Now update the database
+        # 1. Try to complete existing transaction
+        tx = utils.complete_transaction(req.reference)
+        
+        if not tx:
+            # 2. If it doesn't exist, use meta/metadata for credits if available
+            # Squad uses 'meta', Paystack uses 'metadata'
+            metadata = tx_data.get("meta") or tx_data.get("metadata")
+            credits_to_add = 0
+            
+            if metadata and isinstance(metadata, dict):
+                credits_to_add = int(metadata.get("credits", 0))
+            
+            # Fallback calculation if metadata is missing
+            if credits_to_add <= 0:
+                try:
+                    # Squad uses 'transaction_amount', Paystack uses 'amount'
+                    amount_kobo = int(tx_data.get("transaction_amount") or tx_data.get("amount") or 0)
+                    amount_ngn = amount_kobo / 100
+                    # Use default rate: 1 NGN = 3 credits
+                    credits_to_add = int(amount_ngn * 3)
+                except (ValueError, TypeError) as e:
+                    logger.error(f"Error parsing amount from Squad: {e}")
+                    credits_to_add = 0
+            
+            # Create and complete
+            amount_kobo_final = int(tx_data.get("transaction_amount") or tx_data.get("amount") or 0)
+            amount_ngn_final = amount_kobo_final / 100
+            utils.create_transaction(current_user['id'], req.reference, amount_ngn_final, credits_to_add)
+            tx = utils.complete_transaction(req.reference)
+            
+        if not tx:
+            raise HTTPException(status_code=500, detail="Could not process transaction in database")
+            
+        utils.add_log(f"Payment verified for ref: {req.reference}. Added {tx['credits_added']} credits.", "SUCCESS", user_id=current_user['id'])
+        
+        return {
+            "status": "success", 
+            "credits_added": tx['credits_added'],
+            "new_balance": utils.get_user_credits(current_user['id'])
+        }
+        
+    except httpx.RequestError as e:
+        logger.error(f"Network error verifying payment: {repr(e)}")
+        raise HTTPException(status_code=503, detail=f"Could not connect to Squad gateway: {type(e).__name__}. Please try again.")
+    except Exception as e:
+        logger.error(f"Unexpected error in payment verification: {repr(e)}")
+        if isinstance(e, HTTPException): raise
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 
 # Serve Static Files (SPA Support)
 # This MUST be last to allow API routes to work first

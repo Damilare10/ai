@@ -1,6 +1,16 @@
 document.addEventListener('DOMContentLoaded', () => {
     // --- GLOBAL VARIABLES START ---
-    // --- GLOBAL VARIABLES START ---
+    // --- GLOBAL ERROR TRACKING ---
+    window.onerror = function(message, source, lineno, colno, error) {
+        const errorMsg = `Error: ${message} at ${source}:${lineno}:${colno}`;
+        console.error(errorMsg);
+        if (typeof log === 'function') {
+            log(errorMsg, 'error');
+        }
+        return false;
+    };
+
+    console.log("Dashboard Script Initialized");
     const token = localStorage.getItem('token');
 
     // --- GUEST MODE LOGIC ---
@@ -32,6 +42,25 @@ document.addEventListener('DOMContentLoaded', () => {
             profileModalUsernameEl.textContent = 'Guest';
         }
     }
+
+    // --- PAYMENT CONFIG START ---
+    let cachedSquadPublicKey = null;
+    async function fetchPaymentConfig() {
+        if (!token) return;
+        try {
+            const configRes = await fetchWithAuth('/api/config/payment');
+            if (configRes.ok) {
+                const configData = await configRes.json();
+                if (configData.squad_public_key) {
+                    cachedSquadPublicKey = configData.squad_public_key;
+                    console.log("Squad config loaded");
+                }
+            }
+        } catch (e) {
+            console.error("Failed to fetch payment config", e);
+        }
+    }
+    // --- PAYMENT CONFIG END ---
 
     // --- PWA INSTALL LOGIC ---
     let deferredPrompt;
@@ -155,12 +184,21 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Initialize
-    initChart();
+    try {
+        if (typeof Chart !== 'undefined') {
+            initChart();
+        } else {
+            console.warn("Chart.js not loaded, skipping chart initialization");
+        }
+    } catch (e) {
+        console.error("Failed to initialize chart:", e);
+    }
     loadStats();
     loadQueue(); // Load persisted queue items
     loadCurrentUser();
     pollStatus(); // Start polling
-    setInterval(pollStatus, 2000); // Poll every 2 seconds
+    fetchPaymentConfig(); // Pre-fetch squad key
+    setInterval(pollStatus, 5000); // Poll every 5 seconds
 
     // Event Listeners
     startBatchBtn.addEventListener('click', startBatchProcessing);
@@ -222,6 +260,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 loadSettings();
             } else if (targetId === 'history-view') {
                 loadHistory();
+            } else if (targetId === 'referrals-view') {
+                loadReferrals();
             } else if (targetId === 'admin-status-view') {
                 if (typeof loadAdminStats === 'function') {
                     loadAdminStats();
@@ -316,10 +356,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // Polling for status and logs
     async function pollStatus() {
         try {
-            // 1. Get Status
-            const statusRes = await fetchWithAuth('/api/batch/status');
-            const status = await statusRes.json();
-
+            // Updated to use the unified summary endpoint
+            const summaryRes = await fetchWithAuth('/api/dashboard/summary');
+            if (!summaryRes.ok) return;
+            
+            const summary = await summaryRes.json();
+            
+            // 1. Update Batch Status
+            const status = summary.batch;
             if (status.is_processing) {
                 isProcessing = true;
                 startBatchBtn.style.display = 'none';
@@ -333,21 +377,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 startBatchBtn.disabled = false;
             }
 
-            // 2. Get Logs
-            const logsRes = await fetchWithAuth('/api/logs?limit=50');
-            const logs = await logsRes.json();
-
-            // Filter for new logs only
+            // 2. Update Logs
+            const logs = summary.logs;
             const newLogs = logs.filter(log => log.id > maxSeenLogId);
 
             if (newLogs.length > 0) {
                 newLogs.forEach(log => {
-                    // Update maxSeenLogId
                     if (log.id > maxSeenLogId) {
                         maxSeenLogId = log.id;
                     }
-
-                    // Only display if it meets the clear filter
                     if (log.id > minLogIdToDisplay) {
                         const div = document.createElement('div');
                         div.className = `log-entry ${log.level.toLowerCase()}`;
@@ -358,11 +396,45 @@ document.addEventListener('DOMContentLoaded', () => {
                 consoleLog.scrollTop = consoleLog.scrollHeight;
             }
 
-            // 3. Refresh Queue (to show new items automatically)
-            await loadQueue();
+            // 3. Update Queue
+            const queueItems = summary.queue;
+            const backendIds = new Set(queueItems.map(item => item.id));
+
+            if (typeof locallyDeletedIds !== 'undefined') {
+                locallyDeletedIds.forEach(id => {
+                    if (!backendIds.has(id)) locallyDeletedIds.delete(id);
+                });
+            }
+
+            const currentDomItems = Array.from(reviewList.querySelectorAll('.review-item'));
+            currentDomItems.forEach(el => {
+                const qId = parseInt(el.dataset.queueId);
+                const isIgnored = (typeof locallyDeletedIds !== 'undefined') && locallyDeletedIds.has(qId);
+                if (qId && (!backendIds.has(qId) || isIgnored)) {
+                    el.remove();
+                }
+            });
+
+            queueItems.forEach(item => {
+                const isIgnored = (typeof locallyDeletedIds !== 'undefined') && locallyDeletedIds.has(item.id);
+                if (isIgnored) return;
+                const exists = reviewList.querySelector(`.review-item[data-queue-id="${item.id}"]`);
+                if (!exists) {
+                    addToReviewQueue(item.tweet_id, item.tweet_text, item.reply_text, item.id);
+                }
+            });
+            updateQueueCount();
+
+            // 4. Update Credits (Header)
+            if (summary.credits !== undefined) {
+                const creditsEl = document.getElementById('creditsDisplay');
+                if (creditsEl) {
+                    creditsEl.textContent = `Credits: ${summary.credits}`;
+                }
+            }
 
         } catch (e) {
-            console.error('Polling error:', e);
+            console.error('Unified polling error:', e);
         }
     }
 
@@ -541,9 +613,9 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="review-text" contenteditable="true" style="white-space: pre-wrap;">${replyText}</div>
             <div class="review-actions">
                 <div class="action-group">
-                    <button class="btn-sm btn-secondary btn-copy" title="Copy to Clipboard">📋</button>
-                    <button class="btn-sm btn-secondary btn-intent" title="Open in X">𝕏</button>
-                    <button class="btn-sm btn-secondary btn-done" title="Mark as Done">✅</button>
+                    <button class="btn-sm btn-secondary btn-copy" title="Copy to Clipboard">Copy</button>
+                    <button class="btn-sm btn-secondary btn-intent" title="Open in X">Open</button>
+                    <button class="btn-sm btn-secondary btn-done" title="Mark as Done">Done</button>
                 </div>
                 <div class="action-group">
                     <button class="btn-sm btn-discard">Discard</button>
@@ -591,7 +663,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const textToCopy = getCurrentText();
             navigator.clipboard.writeText(textToCopy).then(() => {
                 const originalText = copyBtn.textContent;
-                copyBtn.textContent = '✅';
+                copyBtn.textContent = 'Done';
                 setTimeout(() => copyBtn.textContent = originalText, 2000);
             });
         });
@@ -742,8 +814,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const user = await res.json();
                 const usernameEl = document.getElementById('sidebarUsername');
                 if (usernameEl) {
-                    // Add a little user icon + the name
-                    usernameEl.innerHTML = `👤 ${user.username} `;
+                    usernameEl.innerHTML = `${user.username} `;
                 }
 
                 const profileModalUsernameEl = document.getElementById('profileModalUsername');
@@ -773,6 +844,24 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    // --- PAYMENT SUCCESS MODAL ---
+    const paymentSuccessModal = document.getElementById('paymentSuccessModal');
+    const successModalCredits = document.getElementById('successModalCredits');
+    const successModalOk = document.getElementById('successModalOk');
+
+    function showPaymentSuccessModal(credits) {
+        if (paymentSuccessModal && successModalCredits) {
+            successModalCredits.textContent = `+${credits} credits`;
+            paymentSuccessModal.classList.add('active');
+        } else {
+            alert(`Payment successful! Added ${credits} credits.`);
+        }
+    }
+
+    if (successModalOk) {
+        successModalOk.onclick = () => paymentSuccessModal.classList.remove('active');
+    }
+
     async function loadStats() {
         try {
             const res = await fetchWithAuth('/api/stats');
@@ -795,10 +884,232 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             updateChart(stats);
-            updateChart(stats);
         } catch (e) {
             if (token) console.error('Failed to load stats', e);
         }
+    }
+
+    // --- REFERRALS SYSTEM ---
+    async function loadReferrals() {
+        try {
+            const res = await fetchWithAuth('/api/user/referrals');
+            const data = await res.json();
+
+            // Set referral link
+            const baseUrl = window.location.origin;
+            const refLink = `${baseUrl}/login.html?ref=${data.referral_code}`;
+            document.getElementById('referralLinkInput').value = refLink;
+
+            // Render list
+            const tbody = document.getElementById('referralsListBody');
+            const totalCountEl = document.getElementById('totalReferralsCount'); // New
+            if (totalCountEl) {
+                totalCountEl.textContent = data.referrals ? data.referrals.length : 0;
+            }
+            tbody.innerHTML = '';
+
+            if (data.referrals && data.referrals.length > 0) {
+                data.referrals.forEach(ref => {
+                    const tr = document.createElement('tr');
+                    tr.style.borderBottom = '1px solid rgba(255,255,255,0.05)';
+                    const localDate = new Date(ref.created_at + 'Z').toLocaleString();
+                    tr.innerHTML = `
+                        <td style="padding: 12px; font-weight: 500;">${ref.username}</td>
+                        <td style="padding: 12px; text-align: right; color: #94a3b8; font-size: 0.9rem;">${localDate}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } else {
+                tbody.innerHTML = '<tr><td colspan="2" style="text-align: center; padding: 12px; color: #94a3b8;">No referrals yet. Share your link to earn more credits!</td></tr>';
+            }
+        } catch (e) {
+            console.error('Failed to load referrals', e);
+        }
+    }
+
+    const copyRefBtn = document.getElementById('copyReferralLinkBtn');
+    if (copyRefBtn) {
+        copyRefBtn.addEventListener('click', () => {
+            const linkInput = document.getElementById('referralLinkInput');
+            linkInput.select();
+            document.execCommand("copy");
+            const ogText = copyRefBtn.textContent;
+            copyRefBtn.textContent = 'Copied!';
+            setTimeout(() => { copyRefBtn.textContent = ogText; }, 2000);
+        });
+    }
+
+    const refreshReferralsBtn = document.getElementById('refreshReferrals');
+    if (refreshReferralsBtn) refreshReferralsBtn.addEventListener('click', loadReferrals);
+
+    // --- SQUAD INTEGRATION ---
+    const squadBtn = document.getElementById('squadCheckoutBtn');
+    const customSquadBtn = document.getElementById('customSquadBtn');
+    const customCreditsInput = document.getElementById('customCreditsInput');
+    const customNgnDisplay = document.getElementById('customNgnDisplay');
+
+    // Handle Custom Amount Input Change
+    if (customCreditsInput && customNgnDisplay) {
+        const updateNgn = () => {
+            let credits = parseInt(customCreditsInput.value);
+            if (isNaN(credits) || credits < 300) {
+                customNgnDisplay.textContent = '₦-- NGN (Min 300)';
+                return;
+            }
+            let ngn = Math.ceil(credits / 3);
+            customNgnDisplay.textContent = `₦${ngn} NGN`;
+        };
+
+        customCreditsInput.addEventListener('input', updateNgn);
+
+        const incBtn = document.getElementById('incrementCredits');
+        const decBtn = document.getElementById('decrementCredits');
+
+        if (incBtn) {
+            incBtn.addEventListener('click', () => {
+                let val = parseInt(customCreditsInput.value) || 300;
+                customCreditsInput.value = val + 5;
+                updateNgn();
+            });
+        }
+        if (decBtn) {
+            decBtn.addEventListener('click', () => {
+                let val = parseInt(customCreditsInput.value) || 300;
+                if (val > 300) {
+                    customCreditsInput.value = Math.max(300, val - 5);
+                    updateNgn();
+                }
+            });
+        }
+    }
+
+    async function initiateSquadCheckout(amountNgn, creditsToAdd) {
+        console.log("initiateSquadCheckout called with:", { amountNgn, creditsToAdd });
+        if (!token) {
+            alert("Please login first to purchase credits");
+            return;
+        }
+
+        const usernameEl = document.getElementById('profileModalUsername');
+        const displayUsername = usernameEl ? usernameEl.textContent : 'user';
+        const cleanUsername = displayUsername.split('(')[0].trim().replace(/[^a-zA-Z0-9]/g, '');
+        const userEmail = 'mumunihabib10@gmail.com';
+        
+        const referenceId = `sq_chk_${amountNgn}_` + Math.random().toString(36).substring(2, 15) + Date.now();
+
+        console.log(`Initiating Squad: Amount=${amountNgn}, Credits=${creditsToAdd}, Email=${userEmail}, Ref=${referenceId}`);
+
+        if (typeof squad === 'undefined' && typeof SquadPay === 'undefined') {
+            console.error("Squad SDK is undefined! Check if checkout.squadco.com/widget/squad.min.js is loaded.");
+            log("Critical Error: Squad SDK not loaded.", "error");
+            alert("Error: Squad script not loaded. Please check your connection or disable ad-blockers.");
+            return;
+        }
+
+        let publicKey = cachedSquadPublicKey;
+        console.log("Current cachedSquadPublicKey:", publicKey);
+        
+        if (!publicKey || publicKey === 'pk_test_placeholder') {
+             console.log("Key missing or placeholder, attempting to fetch...");
+             await fetchPaymentConfig();
+             publicKey = cachedSquadPublicKey;
+        }
+
+        if (!publicKey) {
+             console.error("No Squad Public Key available even after fetch attempt.");
+             alert("Configuration error: Squad Public Key not found. Please contact admin.");
+             return;
+        }
+
+        try {
+            console.log("Calling Squad setup...");
+            const squadInstance = new squad({
+                onClose: () => {
+                    console.log('Squad Window closed');
+                    log("Squad checkout closed by user.", "warning");
+                },
+                onLoad: () => {
+                    console.log("Squad loaded successfully");
+                },
+                onSuccess: function(response) {
+                    console.log("Squad Success Response:", response);
+                    
+                    log(`Payment authorized. Verifying reference: ${referenceId}...`, "INFO");
+
+                    (async () => {
+                        try {
+                            const verificationRes = await fetchWithAuth('/api/payment/verify', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ reference: referenceId })
+                            });
+
+                            if (verificationRes.ok) {
+                                const resData = await verificationRes.json();
+                                showPaymentSuccessModal(resData.credits_added);
+                                // Instant UI refresh
+                                loadCurrentUser(); 
+                                pollStatus(); 
+                            } else {
+                                const err = await verificationRes.json();
+                                alert(`Payment verification failed: ${err.detail || 'Unknown error'}`);
+                            }
+                        } catch (vErr) {
+                            console.error("Verification Network Error:", vErr);
+                            alert("Network error during payment verification. Please contact support with your reference: " + referenceId);
+                        }
+                    })();
+                },
+                key: publicKey,
+                email: userEmail,
+                amount: amountNgn * 100, // NGN in kobo
+                currency_code: 'NGN',
+                transaction_ref: referenceId,
+                payment_channels: ['card', 'bank', 'ussd', 'transfer']
+            });
+            console.log("Handler setup complete, calling setup/open...");
+            squadInstance.setup();
+            squadInstance.open();
+        } catch (setupErr) {
+            console.error("Squad Setup Crash:", setupErr);
+            alert("Failed to initialize Squad: " + setupErr.message);
+        }
+    }
+
+    if (squadBtn) {
+        squadBtn.addEventListener('click', async () => {
+            console.log("Squad 4000 Button Clicked");
+            const originalText = squadBtn.textContent;
+            squadBtn.textContent = 'Opening Squad...';
+            squadBtn.disabled = true;
+            try {
+                await initiateSquadCheckout(4000, 15000); // Pro Package: 4k NGN for 15k credits
+            } finally {
+                squadBtn.textContent = originalText;
+                squadBtn.disabled = false;
+            }
+        });
+    }
+
+    if (customSquadBtn) {
+        customSquadBtn.addEventListener('click', async () => {
+            let credits = parseInt(customCreditsInput.value);
+            if (isNaN(credits) || credits < 300) {
+                alert("Minimum purchase is 300 credits (₦100).");
+                return;
+            }
+            let amountNgn = Math.ceil(credits / 3);
+            
+            const originalText = customSquadBtn.textContent;
+            customSquadBtn.textContent = 'Opening...';
+            customSquadBtn.disabled = true;
+            try {
+                await initiateSquadCheckout(amountNgn, credits);
+            } finally {
+                customSquadBtn.textContent = originalText;
+                customSquadBtn.disabled = false;
+            }
+        });
     }
 
     function initChart() {
@@ -861,226 +1172,226 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Modal Handling
     const modal = document.getElementById('intentModal');
-    const modalTweetId = document.getElementById('modalTweetId');
-    const modalComment = document.getElementById('modalComment');
-    const modalConfirm = document.getElementById('modalConfirm');
-    const modalCancel = document.getElementById('modalCancel');
-    const modalClose = document.querySelector('.modal-close');
+const modalTweetId = document.getElementById('modalTweetId');
+const modalComment = document.getElementById('modalComment');
+const modalConfirm = document.getElementById('modalConfirm');
+const modalCancel = document.getElementById('modalCancel');
+const modalClose = document.querySelector('.modal-close');
 
-    let pendingIntentUrl = null;
-    let pendingItemElement = null;
-    let pendingTweetId = null;
-    let pendingReplyText = null;
+let pendingIntentUrl = null;
+let pendingItemElement = null;
+let pendingTweetId = null;
+let pendingReplyText = null;
 
-    function showIntentModal(tweetId, comment, itemElement) {
+function showIntentModal(tweetId, comment, itemElement) {
+    try {
+        log('Opening intent modal...', 'info');
+        if (modalTweetId) modalTweetId.textContent = tweetId;
+        if (modalComment) modalComment.textContent = comment;
+
+        pendingIntentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(comment)}&in_reply_to=${tweetId}`;
+        pendingItemElement = itemElement;
+        pendingTweetId = tweetId;
+        pendingReplyText = comment;
+
+        // Immediately open Twitter in new tab
         try {
-            log('Opening intent modal...', 'info');
-            if (modalTweetId) modalTweetId.textContent = tweetId;
-            if (modalComment) modalComment.textContent = comment;
-
-            pendingIntentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(comment)}&in_reply_to=${tweetId}`;
-            pendingItemElement = itemElement;
-            pendingTweetId = tweetId;
-            pendingReplyText = comment;
-
-            // Immediately open Twitter in new tab
-            try {
-                window.open(pendingIntentUrl, '_blank');
-            } catch (err) {
-                console.error('Failed to open Twitter window:', err);
-                log('Popup blocked? Please allow popups.', 'warning');
-            }
-
-            // Show the modal for confirmation when user returns
-            if (modal) {
-                modal.classList.add('active');
-                log('Modal activated', 'success');
-            } else {
-                console.error('Modal element not found');
-            }
-        } catch (e) {
-            console.error('Error in showIntentModal:', e);
-            log(`Error showing modal: ${e.message}`, 'error');
+            window.open(pendingIntentUrl, '_blank');
+        } catch (err) {
+            console.error('Failed to open Twitter window:', err);
+            log('Popup blocked? Please allow popups.', 'warning');
         }
+
+        // Show the modal for confirmation when user returns
+        if (modal) {
+            modal.classList.add('active');
+            log('Modal activated', 'success');
+        } else {
+            console.error('Modal element not found');
+        }
+    } catch (e) {
+        console.error('Error in showIntentModal:', e);
+        log(`Error showing modal: ${e.message}`, 'error');
     }
+}
 
-    function hideIntentModal() {
-        modal.classList.remove('active');
-        pendingIntentUrl = null;
-        pendingItemElement = null;
-        pendingTweetId = null;
-        pendingReplyText = null;
-    }
+function hideIntentModal() {
+    modal.classList.remove('active');
+    pendingIntentUrl = null;
+    pendingItemElement = null;
+    pendingTweetId = null;
+    pendingReplyText = null;
+}
 
-    if (modalConfirm) {
-        modalConfirm.addEventListener('click', async () => {
-            console.log("Modal Confirm Clicked"); // Debug Log
+if (modalConfirm) {
+    modalConfirm.addEventListener('click', async () => {
+        console.log("Modal Confirm Clicked"); // Debug Log
 
-            // Check if we have the pending data
-            if (pendingTweetId && pendingReplyText) {
-                // Pass the stored element (pendingItemElement) to markAsDone
-                await markAsDone(pendingItemElement, pendingTweetId, pendingReplyText);
-                hideIntentModal();
+        // Check if we have the pending data
+        if (pendingTweetId && pendingReplyText) {
+            // Pass the stored element (pendingItemElement) to markAsDone
+            await markAsDone(pendingItemElement, pendingTweetId, pendingReplyText);
+            hideIntentModal();
+        } else {
+            console.error("Missing pending data for modal confirm");
+            hideIntentModal();
+        }
+    });
+}
+
+if (modalCancel) modalCancel.addEventListener('click', hideIntentModal);
+if (modalClose) modalClose.addEventListener('click', hideIntentModal);
+
+if (modal) {
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            hideIntentModal();
+        }
+    });
+}
+
+// Credentials Toggle
+const toggleCredentialsBtn = document.getElementById('toggleCredentials');
+let credentialsVisible = false;
+
+if (toggleCredentialsBtn) {
+    toggleCredentialsBtn.addEventListener('click', () => {
+        credentialsVisible = !credentialsVisible;
+        toggleCredentialsBtn.textContent = credentialsVisible ? 'Hide' : 'Show';
+
+        // Select all secret fields (IDs and Classes)
+        const secretInputs = document.querySelectorAll(
+            '#postApiSecret, #postAccessSecret, .scrape-api-secret, .scrape-access-secret, .scrape-bearer-token'
+        );
+
+        secretInputs.forEach(input => {
+            input.type = credentialsVisible ? 'text' : 'password';
+        });
+    });
+}
+
+// --- Settings Functions ---
+
+async function loadSettings() {
+    try {
+        const res = await fetchWithAuth('/api/settings');
+        const settings = await res.json();
+
+        // Posting Credentials (OAuth 2.0 Status)
+        const oauthStatusText = document.getElementById('oauthStatusText');
+        const connectTwitterBtn = document.getElementById('connectTwitterBtn');
+        const disconnectTwitterBtn = document.getElementById('disconnectTwitterBtn');
+
+        if (settings.posting_credentials && settings.posting_credentials.access_token) {
+            if (oauthStatusText) oauthStatusText.textContent = 'Account Connected';
+            if (oauthStatusText) oauthStatusText.style.color = '#10b981'; // Green
+            if (connectTwitterBtn) connectTwitterBtn.style.display = 'none';
+            if (disconnectTwitterBtn) disconnectTwitterBtn.style.display = 'inline-block';
+        } else {
+            if (oauthStatusText) oauthStatusText.textContent = 'Not Connected to Twitter';
+            if (oauthStatusText) oauthStatusText.style.color = '#94a3b8'; // Gray
+            if (connectTwitterBtn) connectTwitterBtn.style.display = 'inline-flex';
+            if (disconnectTwitterBtn) disconnectTwitterBtn.style.display = 'none';
+        }
+
+        // Scraping Credentials
+        const scrapingAccountsList = document.getElementById('scrapingAccountsList');
+        if (scrapingAccountsList) {
+            scrapingAccountsList.innerHTML = '';
+            if (settings.scraping_credentials && settings.scraping_credentials.length > 0) {
+                settings.scraping_credentials.forEach(cred => addScrapingAccount(cred));
             } else {
-                console.error("Missing pending data for modal confirm");
-                hideIntentModal();
+                // Add one empty default if none exist
+                addScrapingAccount();
             }
-        });
+        }
+
+    } catch (e) {
+        console.error('Failed to load settings', e);
+        log('Failed to load settings', 'error');
     }
+}
 
-    if (modalCancel) modalCancel.addEventListener('click', hideIntentModal);
-    if (modalClose) modalClose.addEventListener('click', hideIntentModal);
+// Connect & Disconnect Handlers
+const connectTwitterBtn = document.getElementById('connectTwitterBtn');
+const disconnectTwitterBtn = document.getElementById('disconnectTwitterBtn');
 
-    if (modal) {
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                hideIntentModal();
-            }
-        });
-    }
-
-    // Credentials Toggle
-    const toggleCredentialsBtn = document.getElementById('toggleCredentials');
-    let credentialsVisible = false;
-
-    if (toggleCredentialsBtn) {
-        toggleCredentialsBtn.addEventListener('click', () => {
-            credentialsVisible = !credentialsVisible;
-            toggleCredentialsBtn.textContent = credentialsVisible ? '🙈' : '👁️';
-
-            // Select all secret fields (IDs and Classes)
-            const secretInputs = document.querySelectorAll(
-                '#postApiSecret, #postAccessSecret, .scrape-api-secret, .scrape-access-secret, .scrape-bearer-token'
-            );
-
-            secretInputs.forEach(input => {
-                input.type = credentialsVisible ? 'text' : 'password';
-            });
-        });
-    }
-
-    // --- Settings Functions ---
-
-    async function loadSettings() {
+if (connectTwitterBtn) {
+    connectTwitterBtn.addEventListener('click', async () => {
+        const originalText = connectTwitterBtn.innerHTML;
+        connectTwitterBtn.innerHTML = 'Connecting...';
+        connectTwitterBtn.disabled = true;
         try {
-            const res = await fetchWithAuth('/api/settings');
-            const settings = await res.json();
-
-            // Posting Credentials (OAuth 2.0 Status)
-            const oauthStatusText = document.getElementById('oauthStatusText');
-            const connectTwitterBtn = document.getElementById('connectTwitterBtn');
-            const disconnectTwitterBtn = document.getElementById('disconnectTwitterBtn');
-
-            if (settings.posting_credentials && settings.posting_credentials.access_token) {
-                if (oauthStatusText) oauthStatusText.textContent = 'Account Connected';
-                if (oauthStatusText) oauthStatusText.style.color = '#10b981'; // Green
-                if (connectTwitterBtn) connectTwitterBtn.style.display = 'none';
-                if (disconnectTwitterBtn) disconnectTwitterBtn.style.display = 'inline-block';
+            const res = await fetchWithAuth('/api/auth/twitter/login');
+            if (res.ok) {
+                const data = await res.json();
+                if (data.url) {
+                    window.location.href = data.url;
+                }
             } else {
-                if (oauthStatusText) oauthStatusText.textContent = 'Not Connected to Twitter';
-                if (oauthStatusText) oauthStatusText.style.color = '#94a3b8'; // Gray
-                if (connectTwitterBtn) connectTwitterBtn.style.display = 'inline-flex';
-                if (disconnectTwitterBtn) disconnectTwitterBtn.style.display = 'none';
-            }
-
-            // Scraping Credentials
-            const scrapingAccountsList = document.getElementById('scrapingAccountsList');
-            if (scrapingAccountsList) {
-                scrapingAccountsList.innerHTML = '';
-                if (settings.scraping_credentials && settings.scraping_credentials.length > 0) {
-                    settings.scraping_credentials.forEach(cred => addScrapingAccount(cred));
-                } else {
-                    // Add one empty default if none exist
-                    addScrapingAccount();
-                }
-            }
-
-        } catch (e) {
-            console.error('Failed to load settings', e);
-            log('Failed to load settings', 'error');
-        }
-    }
-
-    // Connect & Disconnect Handlers
-    const connectTwitterBtn = document.getElementById('connectTwitterBtn');
-    const disconnectTwitterBtn = document.getElementById('disconnectTwitterBtn');
-
-    if (connectTwitterBtn) {
-        connectTwitterBtn.addEventListener('click', async () => {
-            const originalText = connectTwitterBtn.innerHTML;
-            connectTwitterBtn.innerHTML = 'Connecting...';
-            connectTwitterBtn.disabled = true;
-            try {
-                const res = await fetchWithAuth('/api/auth/twitter/login');
-                if (res.ok) {
-                    const data = await res.json();
-                    if (data.url) {
-                        window.location.href = data.url;
-                    }
-                } else {
-                    showToast("Failed to initialize Twitter Login", "error");
-                    connectTwitterBtn.innerHTML = originalText;
-                    connectTwitterBtn.disabled = false;
-                }
-            } catch (err) {
-                showToast("Network error initiating login", "error");
+                showToast("Failed to initialize Twitter Login", "error");
                 connectTwitterBtn.innerHTML = originalText;
                 connectTwitterBtn.disabled = false;
             }
-        });
-    }
+        } catch (err) {
+            showToast("Network error initiating login", "error");
+            connectTwitterBtn.innerHTML = originalText;
+            connectTwitterBtn.disabled = false;
+        }
+    });
+}
 
-    if (disconnectTwitterBtn) {
-        disconnectTwitterBtn.addEventListener('click', async () => {
-            // To disconnect, we simply send empty posting_credentials. The rest of the settings logic handles it.
-            disconnectTwitterBtn.textContent = 'Disconnecting...';
-            disconnectTwitterBtn.disabled = true;
+if (disconnectTwitterBtn) {
+    disconnectTwitterBtn.addEventListener('click', async () => {
+        // To disconnect, we simply send empty posting_credentials. The rest of the settings logic handles it.
+        disconnectTwitterBtn.textContent = 'Disconnecting...';
+        disconnectTwitterBtn.disabled = true;
 
-            // We need to fetch current scraping creds to not overwrite them
-            let scrapingCreds = [];
-            document.querySelectorAll('.scraping-account-item').forEach(item => {
-                scrapingCreds.push({
-                    api_key: item.querySelector('.scrape-api-key').value,
-                    api_secret: item.querySelector('.scrape-api-secret').value,
-                    access_token: item.querySelector('.scrape-access-token').value,
-                    access_secret: item.querySelector('.scrape-access-secret').value,
-                    bearer_token: item.querySelector('.scrape-bearer-token').value
-                });
+        // We need to fetch current scraping creds to not overwrite them
+        let scrapingCreds = [];
+        document.querySelectorAll('.scraping-account-item').forEach(item => {
+            scrapingCreds.push({
+                api_key: item.querySelector('.scrape-api-key').value,
+                api_secret: item.querySelector('.scrape-api-secret').value,
+                access_token: item.querySelector('.scrape-access-token').value,
+                access_secret: item.querySelector('.scrape-access-secret').value,
+                bearer_token: item.querySelector('.scrape-bearer-token').value
             });
-
-            try {
-                const res = await fetchWithAuth('/api/settings', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        posting_credentials: {}, // Empty to indicate disconnect
-                        scraping_credentials: scrapingCreds
-                    })
-                });
-                if (res.ok) {
-                    showToast("Twitter Account Disconnected");
-                    loadSettings(); // Reload UI
-                } else {
-                    showToast("Failed to disconnect", "error");
-                }
-            } catch (err) {
-                showToast("Error disconnecting", "error");
-                disconnectTwitterBtn.textContent = 'Disconnect';
-                disconnectTwitterBtn.disabled = false;
-            }
         });
-    }
+
+        try {
+            const res = await fetchWithAuth('/api/settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    posting_credentials: {}, // Empty to indicate disconnect
+                    scraping_credentials: scrapingCreds
+                })
+            });
+            if (res.ok) {
+                showToast("Twitter Account Disconnected");
+                loadSettings(); // Reload UI
+            } else {
+                showToast("Failed to disconnect", "error");
+            }
+        } catch (err) {
+            showToast("Error disconnecting", "error");
+            disconnectTwitterBtn.textContent = 'Disconnect';
+            disconnectTwitterBtn.disabled = false;
+        }
+    });
+}
 
 
-    function addScrapingAccount(data = {}) {
-        const div = document.createElement('div');
-        div.className = 'scraping-account-item glass-panel';
-        div.style.marginBottom = '1rem';
-        div.style.padding = '1rem';
-        div.style.border = '1px solid rgba(255, 255, 255, 0.1)';
-        const scrapingAccountsList = document.getElementById('scrapingAccountsList');
+function addScrapingAccount(data = {}) {
+    const div = document.createElement('div');
+    div.className = 'scraping-account-item glass-panel';
+    div.style.marginBottom = '1rem';
+    div.style.padding = '1rem';
+    div.style.border = '1px solid rgba(255, 255, 255, 0.1)';
+    const scrapingAccountsList = document.getElementById('scrapingAccountsList');
 
-        div.innerHTML = `
+    div.innerHTML = `
             <div style="display: flex; justify-content: space-between; margin-bottom: 0.5rem;">
                 <h4>TwitterAPI.io Account</h4>
                 <button class="btn-sm btn-secondary remove-account" style="color: var(--error);">Remove</button>
@@ -1091,220 +1402,220 @@ document.addEventListener('DOMContentLoaded', () => {
             </div>
         `;
 
-        div.querySelector('.remove-account').addEventListener('click', () => div.remove());
-        if (scrapingAccountsList) scrapingAccountsList.appendChild(div);
-    }
+    div.querySelector('.remove-account').addEventListener('click', () => div.remove());
+    if (scrapingAccountsList) scrapingAccountsList.appendChild(div);
+}
 
-    async function saveSettings() {
-        const saveBtn = document.getElementById('saveSettingsBtn');
-        const originalText = saveBtn.textContent;
-        saveBtn.textContent = 'Saving...';
-        saveBtn.disabled = true;
+async function saveSettings() {
+    const saveBtn = document.getElementById('saveSettingsBtn');
+    const originalText = saveBtn.textContent;
+    saveBtn.textContent = 'Saving...';
+    saveBtn.disabled = true;
 
-        try {
-            // Collect Scraping Creds
-            const scrapingCreds = [];
-            document.querySelectorAll('.scraping-account-item').forEach(item => {
-                scrapingCreds.push({
-                    api_key: item.querySelector('.scrape-api-key')?.value || ''
-                });
+    try {
+        // Collect Scraping Creds
+        const scrapingCreds = [];
+        document.querySelectorAll('.scraping-account-item').forEach(item => {
+            scrapingCreds.push({
+                api_key: item.querySelector('.scrape-api-key')?.value || ''
             });
+        });
 
-            // To prevent clearing posting credentials, we need to send the current active token status.
-            // But since our Python backend `api/settings` route completely overwrites settings dict, we must pass it along.
-            // Wait, the new logic: if posting_credentials isn't passed from UI, the backend will overwrite with dict unless updated. 
-            // So we need to fetch currents first or just use the current loaded state.
-            const resInit = await fetchWithAuth('/api/settings');
-            const currentSettings = await resInit.json();
+        // To prevent clearing posting credentials, we need to send the current active token status.
+        // But since our Python backend `api/settings` route completely overwrites settings dict, we must pass it along.
+        // Wait, the new logic: if posting_credentials isn't passed from UI, the backend will overwrite with dict unless updated. 
+        // So we need to fetch currents first or just use the current loaded state.
+        const resInit = await fetchWithAuth('/api/settings');
+        const currentSettings = await resInit.json();
 
-            const res = await fetchWithAuth('/api/settings', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    posting_credentials: currentSettings.posting_credentials, // KEEP EXISTING
-                    scraping_credentials: scrapingCreds
-                })
-            });
+        const res = await fetchWithAuth('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                posting_credentials: currentSettings.posting_credentials, // KEEP EXISTING
+                scraping_credentials: scrapingCreds
+            })
+        });
 
-            if (!res.ok) throw new Error('Failed to save settings');
+        if (!res.ok) throw new Error('Failed to save settings');
 
-            log('Settings saved successfully', 'success');
-            saveBtn.textContent = 'Saved!';
-            setTimeout(() => {
-                saveBtn.textContent = originalText;
-                saveBtn.disabled = false;
-            }, 2000);
+        log('Settings saved successfully', 'success');
+        saveBtn.textContent = 'Saved!';
+        setTimeout(() => {
+            saveBtn.textContent = originalText;
+            saveBtn.disabled = false;
+        }, 2000);
 
-        } catch (e) {
-            console.error('Failed to save settings', e);
-            log('Failed to save settings', 'error');
-            saveBtn.textContent = 'Error';
-            setTimeout(() => {
-                saveBtn.textContent = originalText;
-                saveBtn.disabled = false;
-            }, 2000);
-        }
+    } catch (e) {
+        console.error('Failed to save settings', e);
+        log('Failed to save settings', 'error');
+        saveBtn.textContent = 'Error';
+        setTimeout(() => {
+            saveBtn.textContent = originalText;
+            saveBtn.disabled = false;
+        }, 2000);
     }
+}
 
-    // --- ADMIN STATS LOGIC ---
-    async function loadAdminStats() {
-        try {
-            const res = await fetchWithAuth('/api/admin/stats');
-            if (!res.ok) return;
+// --- ADMIN STATS LOGIC ---
+async function loadAdminStats() {
+    try {
+        const res = await fetchWithAuth('/api/admin/stats');
+        if (!res.ok) return;
 
-            const stats = await res.json();
-            const tbody = document.getElementById('adminStatsBody');
-            if (!tbody) return;
+        const stats = await res.json();
+        const tbody = document.getElementById('adminStatsBody');
+        if (!tbody) return;
 
-            tbody.innerHTML = ''; // Clear existing
+        tbody.innerHTML = ''; // Clear existing
 
-            stats.forEach(userStat => {
-                const tr = document.createElement('tr');
-                tr.style.borderBottom = '1px solid rgba(255,255,255,0.05)';
+        stats.forEach(userStat => {
+            const tr = document.createElement('tr');
+            tr.style.borderBottom = '1px solid rgba(255,255,255,0.05)';
 
-                tr.innerHTML = `
+            tr.innerHTML = `
                     <td style="padding: 12px; font-weight: 500;">${userStat.username}</td>
                     <td style="padding: 12px; color: #60a5fa;">${userStat.credits !== undefined ? userStat.credits : 0}</td>
                     <td style="padding: 12px; color: #94a3b8;">${userStat.total_scraped || 0}</td>
                     <td style="padding: 12px; color: #94a3b8;">${userStat.total_generated || 0}</td>
                     <td style="padding: 12px; color: #10b981;">${userStat.total_posted || 0}</td>
                 `;
-                tbody.appendChild(tr);
+            tbody.appendChild(tr);
+        });
+
+    } catch (e) {
+        console.error("Error loading admin stats:", e);
+    }
+}
+
+
+// Bind refresh button
+const refreshAdminStatsBtn = document.getElementById('refreshAdminStats');
+if (refreshAdminStatsBtn) {
+    refreshAdminStatsBtn.addEventListener('click', loadAdminStats);
+}
+
+// Toast Helper
+function showToast(message, type = 'success') {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.innerHTML = type === 'success' ? `Success: ${message}` : `Error: ${message}`;
+
+    container.appendChild(toast);
+
+    // Remove after 3 seconds
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(100%)';
+        setTimeout(() => toast.remove(), 300);
+    }, 3000);
+}
+
+// Bind Add Credits Button (Opens Modal)
+const addCreditsBtn = document.getElementById('addCreditsBtn');
+const creditModal = document.getElementById('creditModal');
+const creditAmountDisp = document.getElementById('modalCreditAmount');
+const creditUserDisp = document.getElementById('modalCreditUser');
+const creditConfirmBtn = document.getElementById('creditModalConfirm');
+const creditCancelBtn = document.getElementById('creditModalCancel');
+const creditCloseBtn = document.getElementById('creditModalClose');
+
+let pendingCreditRequest = null;
+
+// GLOBAL HANDLER for inline onclick fallback
+window.handleAddCredits = function () {
+    const username = document.getElementById('creditUsername').value;
+    const amount = document.getElementById('creditAmount').value;
+
+    if (!username || !amount) {
+        showToast('Please enter username and amount', 'error');
+        return;
+    }
+
+    // Populate Modal
+    creditUserDisp.textContent = username;
+    creditAmountDisp.textContent = amount;
+    pendingCreditRequest = { username, amount: parseInt(amount) };
+
+    // Show Modal
+    creditModal.classList.add('active');
+};
+
+if (addCreditsBtn && creditModal) {
+    addCreditsBtn.addEventListener('click', window.handleAddCredits);
+
+    // Close Modal Logic
+    const closeCreditModal = () => {
+        creditModal.classList.remove('active');
+        pendingCreditRequest = null;
+    };
+
+    creditCloseBtn.onclick = closeCreditModal;
+    creditCancelBtn.onclick = closeCreditModal;
+    window.onclick = (event) => {
+        if (event.target == creditModal) closeCreditModal();
+    };
+
+    // Confirm Action
+    creditConfirmBtn.addEventListener('click', async () => {
+        if (!pendingCreditRequest) return;
+
+        creditConfirmBtn.disabled = true;
+        creditConfirmBtn.textContent = 'Adding...';
+
+        try {
+            const res = await fetchWithAuth('/api/admin/credits', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(pendingCreditRequest)
             });
 
+            const data = await res.json();
+            if (res.ok) {
+                showToast(`Successfully added ${pendingCreditRequest.amount} credits!`);
+                // Refresh stats
+                loadAdminStats();
+                // Refresh own header if added to self
+                loadCurrentUser();
+                closeCreditModal();
+                // Clear inputs
+                document.getElementById('creditUsername').value = '';
+                document.getElementById('creditAmount').value = '';
+            } else {
+                showToast(data.detail || 'Failed to add credits', 'error');
+            }
         } catch (e) {
-            console.error("Error loading admin stats:", e);
+            console.error(e);
+            showToast('Network error', 'error');
+        } finally {
+            creditConfirmBtn.disabled = false;
+            creditConfirmBtn.textContent = 'Confirm & Add';
         }
-    }
+    });
+}
 
+async function loadHistory() {
+    try {
+        const res = await fetchWithAuth('/api/history');
+        const historyItems = await res.json();
+        const historyList = document.getElementById('historyList');
 
-    // Bind refresh button
-    const refreshAdminStatsBtn = document.getElementById('refreshAdminStats');
-    if (refreshAdminStatsBtn) {
-        refreshAdminStatsBtn.addEventListener('click', loadAdminStats);
-    }
+        if (!historyList) return;
 
-    // Toast Helper
-    function showToast(message, type = 'success') {
-        const container = document.getElementById('toastContainer');
-        if (!container) return;
+        historyList.innerHTML = '';
 
-        const toast = document.createElement('div');
-        toast.className = `toast ${type}`;
-        toast.innerHTML = type === 'success' ? `✅ ${message}` : `❌ ${message}`;
-
-        container.appendChild(toast);
-
-        // Remove after 3 seconds
-        setTimeout(() => {
-            toast.style.opacity = '0';
-            toast.style.transform = 'translateY(100%)';
-            setTimeout(() => toast.remove(), 300);
-        }, 3000);
-    }
-
-    // Bind Add Credits Button (Opens Modal)
-    const addCreditsBtn = document.getElementById('addCreditsBtn');
-    const creditModal = document.getElementById('creditModal');
-    const creditAmountDisp = document.getElementById('modalCreditAmount');
-    const creditUserDisp = document.getElementById('modalCreditUser');
-    const creditConfirmBtn = document.getElementById('creditModalConfirm');
-    const creditCancelBtn = document.getElementById('creditModalCancel');
-    const creditCloseBtn = document.getElementById('creditModalClose');
-
-    let pendingCreditRequest = null;
-
-    // GLOBAL HANDLER for inline onclick fallback
-    window.handleAddCredits = function () {
-        const username = document.getElementById('creditUsername').value;
-        const amount = document.getElementById('creditAmount').value;
-
-        if (!username || !amount) {
-            showToast('Please enter username and amount', 'error');
+        if (historyItems.length === 0) {
+            historyList.innerHTML = '<div class="empty-state">No history available</div>';
             return;
         }
 
-        // Populate Modal
-        creditUserDisp.textContent = username;
-        creditAmountDisp.textContent = amount;
-        pendingCreditRequest = { username, amount: parseInt(amount) };
-
-        // Show Modal
-        creditModal.classList.add('active');
-    };
-
-    if (addCreditsBtn && creditModal) {
-        addCreditsBtn.addEventListener('click', window.handleAddCredits);
-
-        // Close Modal Logic
-        const closeCreditModal = () => {
-            creditModal.classList.remove('active');
-            pendingCreditRequest = null;
-        };
-
-        creditCloseBtn.onclick = closeCreditModal;
-        creditCancelBtn.onclick = closeCreditModal;
-        window.onclick = (event) => {
-            if (event.target == creditModal) closeCreditModal();
-        };
-
-        // Confirm Action
-        creditConfirmBtn.addEventListener('click', async () => {
-            if (!pendingCreditRequest) return;
-
-            creditConfirmBtn.disabled = true;
-            creditConfirmBtn.textContent = 'Adding...';
-
-            try {
-                const res = await fetchWithAuth('/api/admin/credits', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(pendingCreditRequest)
-                });
-
-                const data = await res.json();
-                if (res.ok) {
-                    showToast(`Successfully added ${pendingCreditRequest.amount} credits!`);
-                    // Refresh stats
-                    loadAdminStats();
-                    // Refresh own header if added to self
-                    loadCurrentUser();
-                    closeCreditModal();
-                    // Clear inputs
-                    document.getElementById('creditUsername').value = '';
-                    document.getElementById('creditAmount').value = '';
-                } else {
-                    showToast(data.detail || 'Failed to add credits', 'error');
-                }
-            } catch (e) {
-                console.error(e);
-                showToast('Network error', 'error');
-            } finally {
-                creditConfirmBtn.disabled = false;
-                creditConfirmBtn.textContent = 'Confirm & Add';
-            }
-        });
-    }
-
-    async function loadHistory() {
-        try {
-            const res = await fetchWithAuth('/api/history');
-            const historyItems = await res.json();
-            const historyList = document.getElementById('historyList');
-
-            if (!historyList) return;
-
-            historyList.innerHTML = '';
-
-            if (historyItems.length === 0) {
-                historyList.innerHTML = '<div class="empty-state">No history available</div>';
-                return;
-            }
-
-            historyItems.forEach(item => {
-                const div = document.createElement('div');
-                div.className = 'review-item';
-                div.innerHTML = `
+        historyItems.forEach(item => {
+            const div = document.createElement('div');
+            div.className = 'review-item';
+            div.innerHTML = `
                     <div class="review-header">
                         <span>ID: ${item.tweet_id}</span>
                         <span>${item.timestamp}</span>
@@ -1315,27 +1626,27 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span class="badge" style="background: rgba(16, 185, 129, 0.1); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.2);">${item.status || 'Posted'}</span>
                     </div>
                 `;
-                historyList.appendChild(div);
-            });
-
-        } catch (e) {
-            console.error('Failed to load history', e);
-            log('Failed to load history', 'error');
-        }
-    }
-
-    const refreshHistoryBtn = document.getElementById('refreshHistory');
-    if (refreshHistoryBtn) {
-        refreshHistoryBtn.addEventListener('click', loadHistory);
-    }
-
-    // Profile Modal Logout
-    const profileLogoutBtn = document.getElementById('profileLogoutBtn');
-    if (profileLogoutBtn) {
-        profileLogoutBtn.addEventListener('click', () => {
-            localStorage.removeItem('token');
-            window.location.href = '/login.html';
+            historyList.appendChild(div);
         });
+
+    } catch (e) {
+        console.error('Failed to load history', e);
+        log('Failed to load history', 'error');
     }
+}
+
+const refreshHistoryBtn = document.getElementById('refreshHistory');
+if (refreshHistoryBtn) {
+    refreshHistoryBtn.addEventListener('click', loadHistory);
+}
+
+// Profile Modal Logout
+const profileLogoutBtn = document.getElementById('profileLogoutBtn');
+if (profileLogoutBtn) {
+    profileLogoutBtn.addEventListener('click', () => {
+        localStorage.removeItem('token');
+        window.location.href = '/login.html';
+    });
+}
 
 });

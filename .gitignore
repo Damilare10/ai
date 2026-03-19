@@ -2,7 +2,6 @@
 .env
 .env.local
 env/
-
 # Logs
 *.log
 app.log
@@ -65,3 +64,9 @@ htmlcov/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+# Project-specific
+temp_auth_profile/
+fix_referrals*.py
+test_squad_conn.py
+temp_fix_css.py

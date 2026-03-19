@@ -13,6 +13,7 @@ try:
     import psycopg
     from psycopg_pool import ConnectionPool
     from psycopg.rows import dict_row
+    from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type, wait_exponential
 except ImportError:
     psycopg = None
 
@@ -72,11 +73,19 @@ def init_pool():
                 conninfo=db_url,
                 min_size=1, 
                 max_size=20,
-                kwargs={"row_factory": dict_row}
+                timeout=10,  # seconds to wait for a connection from the pool
+                max_idle=300, # Discard connections idle for more than 5 minutes
+                reconnect_timeout=10.0,
+                kwargs={"row_factory": dict_row,
+                        "connect_timeout": 10}  # TCP-level connect timeout
             )
-            logger.info("✅ PostgreSQL Connection Pool Initialized")
+            # Test that we can actually get a working connection
+            with pg_pool.connection(timeout=5) as test_conn:
+                test_conn.execute("SELECT 1")
+            logger.info("PostgreSQL Connection Pool Initialized (with idle management)")
         except Exception as e:
-            logger.error(f"❌ Failed to init Postgres pool: {e}")
+            logger.error(f"Failed to init Postgres pool: {e}. Falling back to SQLite.")
+            pg_pool = None
 
 def get_db_type():
     # Only return postgres if we successfully established a pool
@@ -91,19 +100,10 @@ def get_db_connection():
     try:
         # Use Pool if available
         if pg_pool:
-            conn = pg_pool.getconn()
-            try:
-                # Validation: Check if connection is alive (psycopg3 handles this mostly but keeping logic)
-                with conn.cursor() as curs:
-                    curs.execute("SELECT 1")
-            except (psycopg.OperationalError, psycopg.InterfaceError):
-                logger.warning("♻️ Discarding stale DB connection and fetching new one.")
-                # the psycopg_pool has a check() mechanism automatically, but manual disconnect:
-                conn.close() 
-                conn = pg_pool.getconn() 
-                
-            yield conn
-            conn.commit()
+            with pg_pool.connection(timeout=10) as pg_conn:
+                yield pg_conn
+                pg_conn.commit()
+            return  # connection is automatically returned to pool
         # Fallback to SQLite
         else:
             conn = sqlite3.connect(DB_NAME)
@@ -118,10 +118,8 @@ def get_db_connection():
                 pass # Connection likely already closed
         raise e
     finally:
-        if pg_pool and conn:
-            pg_pool.putconn(conn) # Return to pool
-        elif conn:
-            conn.close() # Close SQLite
+        if conn and not pg_pool:
+            conn.close() # Close SQLite only
 
 from passlib.context import CryptContext
 
@@ -157,17 +155,35 @@ def init_db():
                 username {text_type} UNIQUE NOT NULL,
                 password_hash {text_type} NOT NULL,
                 credits INTEGER DEFAULT 50,
-                created_at {timestamp_default}
+                referral_code {text_type} UNIQUE,
+                referred_by INTEGER,
+                created_at {timestamp_default},
+                FOREIGN KEY (referred_by) REFERENCES users(id)
             )
         ''')
 
-        # Migration: Add credits column if not exists
+        # Migration: Add credits, referral_code, referred_by columns if not exists
         try:
             c.execute("ALTER TABLE users ADD COLUMN credits INTEGER DEFAULT 50")
-            conn.commit() # Commit schema change immediately
+            if pg_pool: conn.commit()
             logger.info("Migrated: Added credits column to users table")
         except Exception:
-            conn.rollback() # Important for Postgres: Rollback if error (e.g. column exists)
+            if pg_pool: conn.rollback()
+            
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN referral_code TEXT UNIQUE")
+            if pg_pool: conn.commit()
+            logger.info("Migrated: Added referral_code column to users table")
+        except Exception:
+            if pg_pool: conn.rollback()
+            
+        try:
+            c.execute("ALTER TABLE users ADD COLUMN referred_by INTEGER REFERENCES users(id)")
+            if pg_pool: conn.commit()
+            logger.info("Migrated: Added referred_by column to users table")
+        except Exception:
+            if pg_pool: conn.rollback()
+
 
 
         # History Table
@@ -266,8 +282,28 @@ def init_db():
             )
         ''')
         
+        # Transactions Table
+        c.execute(f'''
+            CREATE TABLE IF NOT EXISTS transactions (
+                id {primary_key},
+                user_id INTEGER,
+                reference {text_type} UNIQUE NOT NULL,
+                amount DECIMAL(10,2) NOT NULL,
+                credits_added INTEGER NOT NULL,
+                status {text_type} DEFAULT 'pending',
+                created_at {timestamp_default},
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        ''')
+        
         logger.info("Database initialized successfully.")
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    retry=retry_if_exception_type(psycopg.OperationalError) if psycopg else lambda e: False,
+    reraise=True
+)
 def get_user(username: str) -> Optional[Dict]:
     with get_db_connection() as conn:
         c = conn.cursor()
@@ -279,14 +315,55 @@ def get_user(username: str) -> Optional[Dict]:
             return dict(row)
     return None
 
-def create_user(username: str, password: str):
+import secrets
+import string
+
+def generate_referral_code(length=8):
+    characters = string.ascii_letters + string.digits
+    return ''.join(secrets.choice(characters) for _ in range(length))
+
+def get_user_by_referral_code(code: str) -> Optional[Dict]:
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        ph = get_placeholder()
+        c.execute(f"SELECT * FROM users WHERE referral_code = {ph}", (code,))
+        row = c.fetchone()
+        if row:
+            return dict(row)
+    return None
+
+def create_user(username: str, password: str, referred_by: Optional[int] = None):
     password_hash = get_password_hash(password)
+    referral_code = generate_referral_code()
+    
+    # Ensure unique referral code (basic retry)
+    for _ in range(5):
+        if not get_user_by_referral_code(referral_code):
+            break
+        referral_code = generate_referral_code()
+
     with get_db_connection() as conn:
         c = conn.cursor()
         ph = get_placeholder()
         # Initial credits = 50
-        c.execute(f"INSERT INTO users (username, password_hash, credits) VALUES ({ph}, {ph}, 50)", (username, password_hash))
+        c.execute(f"INSERT INTO users (username, password_hash, credits, referral_code, referred_by) VALUES ({ph}, {ph}, 50, {ph}, {ph})", 
+                  (username, password_hash, referral_code, referred_by))
 
+def get_user_referrals(user_id: int) -> List[Dict]:
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        ph = get_placeholder()
+        c.execute(f"SELECT id, username, created_at FROM users WHERE referred_by = {ph} ORDER BY created_at DESC", (user_id,))
+        rows = c.fetchall()
+        return [dict(row) for row in rows]
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    retry=retry_if_exception_type(psycopg.OperationalError) if psycopg else lambda e: False,
+    reraise=True
+)
 def get_user_credits(user_id: int) -> int:
     with get_db_connection() as conn:
         c = conn.cursor()
@@ -295,6 +372,12 @@ def get_user_credits(user_id: int) -> int:
         row = c.fetchone()
         return row['credits'] if row else 0
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    retry=retry_if_exception_type(psycopg.OperationalError) if psycopg else lambda e: False,
+    reraise=True
+)
 def deduct_credits(user_id: int, amount: int) -> bool:
     """
     Deduct credits from user. Returns True if successful, False if insufficient funds.
@@ -313,6 +396,12 @@ def deduct_credits(user_id: int, amount: int) -> bool:
         c.execute(f"UPDATE users SET credits = credits - {amount} WHERE id = {ph}", (user_id,))
         return True
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    retry=retry_if_exception_type(psycopg.OperationalError) if psycopg else lambda e: False,
+    reraise=True
+)
 def add_credits(username: str, amount: int) -> bool:
     """
     Add credits to a user by username.
@@ -325,6 +414,63 @@ def add_credits(username: str, amount: int) -> bool:
         c.execute(f"UPDATE users SET credits = credits + {amount} WHERE LOWER(username) = LOWER({ph})", (username,))
         return c.rowcount > 0
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    retry=retry_if_exception_type(psycopg.OperationalError) if psycopg else lambda e: False,
+    reraise=True
+)
+def create_transaction(user_id: int, reference: str, amount: float, credits_added: int) -> bool:
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        ph = get_placeholder()
+        try:
+            c.execute(f"INSERT INTO transactions (user_id, reference, amount, credits_added, status) VALUES ({ph}, {ph}, {ph}, {ph}, 'pending')",
+                      (user_id, reference, amount, credits_added))
+            return True
+        except Exception as e:
+            logger.error(f"Error creating transaction: {e}")
+            return False
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    retry=retry_if_exception_type(psycopg.OperationalError) if psycopg else lambda e: False,
+    reraise=True
+)
+def complete_transaction(reference: str) -> Optional[Dict]:
+    """Marks transaction as completed and returns it if successful"""
+    with get_db_connection() as conn:
+        c = conn.cursor()
+        ph = get_placeholder()
+        
+        # Check if already completed
+        c.execute(f"SELECT * FROM transactions WHERE reference = {ph}", (reference,))
+        tx_row = c.fetchone()
+        
+        if not tx_row:
+            return None
+            
+        tx = dict(tx_row)
+        if tx['status'] == 'completed':
+            return tx # Already processed
+            
+        # Update transaction status
+        c.execute(f"UPDATE transactions SET status = 'completed' WHERE reference = {ph}", (reference,))
+        
+        if c.rowcount > 0:
+            # Add credits to user
+            c.execute(f"UPDATE users SET credits = credits + {ph} WHERE id = {ph}", (tx['credits_added'], tx['user_id']))
+            return tx
+            
+        return None
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=0.5, min=0.5, max=5),
+    retry=retry_if_exception_type(psycopg.OperationalError) if psycopg else lambda e: False,
+    reraise=True
+)
 def add_log(message: str, level: str = "INFO", user_id: Optional[int] = None):
     if level == "ERROR":
         logger.error(f"[{user_id}] {message}")

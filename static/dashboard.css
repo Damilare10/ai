@@ -826,22 +826,35 @@ input[type="password"]:focus {
         flex-direction: column;
     }
 
+    .nav-item {
+        padding: 16px;
+        font-size: 1.1rem;
+        margin-bottom: 8px;
+    }
+
+    #sidebarToggle {
+        display: flex !important;
+        background: rgba(255, 255, 255, 0.05) !important;
+        border: 1px solid rgba(255, 255, 255, 0.1) !important;
+        border-radius: 12px !important;
+        padding: 10px 16px !important;
+        font-size: 0.9rem !important;
+    }
+
     .sidebar {
         position: fixed;
         height: 100%;
         z-index: 1000;
-        width: 260px;
+        width:  280px;
         left: 0;
         top: 0;
         transform: translateX(0);
-        transition: transform 0.3s ease;
+        transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1); box-shadow: 20px 0 50px rgba(0,0,0,0.5);
     }
 
     .sidebar.hidden {
-        width: 260px;
-        transform: translateX(-100%);
-        padding: 24px;
-        border-right: 1px solid var(--glass-border);
+        width:  280px;
+        transform: translateX(-100%); box-shadow: none;
     }
 
     .main-content {
@@ -868,7 +881,11 @@ input[type="password"]:focus {
     }
 
     .glass-panel {
-        padding: 16px;
+        padding: 16px; border-radius: 16px;
+    }
+
+    textarea, input, select {
+        font-size: 16px !important;
     }
 
     textarea {
@@ -884,9 +901,25 @@ input[type="password"]:focus {
         gap: 12px;
     }
 
+    .btn-sm {
+        padding: 12px 20px;
+        flex: 1;
+        text-align: center;
+    }
+
     .action-group {
         width: 100%;
         justify-content: space-between;
+    }
+
+    .recharge-cards {
+        gap: 1.5rem !important;
+        margin-top: 1rem;
+    }
+
+    .recharge-cards > div {
+        max-width: 100% !important;
+        margin-bottom: 0.5rem;
     }
 }
 /* Toast Notification */
@@ -926,3 +959,15 @@ input[type="password"]:focus {
     to { transform: translateY(0); opacity: 1; }
 }
 
+/* Hide Chrome, Safari, Edge spin-buttons */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+/* Hide Firefox spin-buttons */
+input[type=number] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}

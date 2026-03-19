@@ -67,7 +67,7 @@ TWITTER_CLIENT_ID = os.getenv("TWITTER_CLIENT_ID")
 TWITTER_CLIENT_SECRET = os.getenv("TWITTER_CLIENT_SECRET")
 OAUTH_CALLBACK_URL = os.getenv("OAUTH_CALLBACK_URL", "http://127.0.0.1:8000/api/auth/twitter/callback")
 
-ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
+ENVIRONMENT = os.getenv("ENVIRONMENT", "development").strip()
 DEBUG = os.getenv("DEBUG", "True").lower() == "true"
 HOST = os.getenv("HOST", "127.0.0.1")
 PORT = int(os.getenv("PORT", "8000"))
@@ -86,6 +86,15 @@ if missing_vars:
         f"Missing required environment variables: {', '.join(missing_vars)}\n"
         f"Please create a .env file based on .env.example"
     )
+
+# Squad Payment
+SQUAD_PUBLIC_KEY = os.getenv("SQUAD_PUBLIC_KEY")
+SQUAD_SECRET_KEY = os.getenv("SQUAD_SECRET_KEY")
+
+
+SQUAD_API_BASE = os.getenv("SQUAD_API_BASE")
+if not SQUAD_API_BASE:
+    SQUAD_API_BASE = "https://sandbox-api-d.squadco.com" if ENVIRONMENT == "development" else "https://api.squadco.com"
 
 # Log number of accounts loaded for scraping
 print(f"Loaded {len(API_KEYS)} System Twitter API credential set(s).") 
