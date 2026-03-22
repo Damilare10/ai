@@ -614,7 +614,8 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="review-actions">
                 <div class="action-group">
                     <button class="btn-sm btn-secondary btn-copy" title="Copy to Clipboard">Copy</button>
-                    <button class="btn-sm btn-secondary btn-intent" title="Open in X">Open</button>
+                    <button class="btn-sm btn-secondary btn-intent" title="Reply on X">Send</button>
+                    <button class="btn-sm btn-secondary btn-like" title="Like on X">Like</button>
                     <button class="btn-sm btn-secondary btn-done" title="Mark as Done">Done</button>
                 </div>
                 <div class="action-group">
@@ -627,6 +628,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const discardBtn = item.querySelector('.btn-discard');
         const copyBtn = item.querySelector('.btn-copy');
         const intentBtn = item.querySelector('.btn-intent');
+        const likeBtn = item.querySelector('.btn-like');
         const doneBtn = item.querySelector('.btn-done');
 
         // --- FAIL-SAFE TEXT READER ---
@@ -671,6 +673,11 @@ document.addEventListener('DOMContentLoaded', () => {
         // 4. Intent
         intentBtn.addEventListener('click', () => {
             showIntentModal(tweetId, getCurrentText(), item);
+        });
+
+        // 4.5 Like Intent
+        likeBtn.addEventListener('click', () => {
+            window.open(`https://twitter.com/intent/like?tweet_id=${tweetId}`, '_blank');
         });
 
         // 5. Done

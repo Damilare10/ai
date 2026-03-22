@@ -29,6 +29,8 @@ def generate_reply(tweet_text, tone="professional", user_id=None):
            - If "professional": Be insightful, polite, and clear.
            - If "funny": Make a light joke or witty observation.
         2. **Substance:** Do NOT just say "Great project" or "Sounds good". 
+           - **CRITICAL:** Avoid starting with repetitive phrases like "I completely agree", "Great point", "Interesting", or "That sounds like".
+           - Vary your openings: Start with a question, a direct observation about a detail, or a specific insight.
            - Pick one specific detail from the tweet to comment on.
            - Share a quick related opinion.
         3. **Length:** Keep it under 200 characters. Short and punchy.
@@ -96,6 +98,8 @@ def generate_batch_replies(tweets_data: list[dict], tone="professional", user_id
         2. **Output Format:** Return a STRICT JSON ARRAY of objects. Each object must have "id" (matching input) and "reply".
            Example: [ {{"id": "123", "reply": "Cool stuff!"}}, {{"id": "456", "reply": "Nice one!"}} ]
         3. **Content:** Pick a specific detail to comment on. No generic "Nice tweet".
+           - **CRITICAL:** Avoid starting with "I completely agree", "Great point", or "That's very interesting". 
+           - Ensure each reply in the batch starts differently.
         4. **Length:** Under 200 chars per reply.
         5. **No Formatting:** Plain text only. No hashtags, no markdown.
         6. **CRITICAL:** Ensure valid JSON - proper commas between objects, no trailing commas.

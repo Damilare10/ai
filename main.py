@@ -332,7 +332,7 @@ class GenerateRequest(BaseModel):
     @validator('tone')
     def validate_tone(cls, v):
         """Validate tone is one of the allowed values."""
-        allowed_tones = ['professional', 'casual', 'witty', 'friendly']
+        allowed_tones = ['professional', 'casual', 'witty', 'friendly', 'shuffle']
         if v not in allowed_tones:
             raise ValueError(f'Tone must be one of: {", ".join(allowed_tones)}')
         return v
@@ -879,13 +879,19 @@ class BatchManager:
                     continue
 
                 # 4. Batch Generate
+                current_tone = session.tone
+                if session.tone == "shuffle":
+                    tones = ['professional', 'casual', 'witty', 'friendly']
+                    current_tone = tones[batch_index % len(tones)]
+                    utils.add_log(f"  > Shuffle Mode: Using '{current_tone}' tone for this batch.", "INFO", user_id=session.user_id)
+
                 utils.add_log(f"  > Generating batch replies ({len(valid_tweets_for_ai)} items)...", "INFO", user_id=session.user_id)
                 
                 try:
                     generated_replies = await asyncio.to_thread(
                         ai_agent.generate_batch_replies,
                         tweets_data=valid_tweets_for_ai,
-                        tone=session.tone,
+                        tone=current_tone,
                         user_id=session.user_id
                     )
                     
