@@ -815,7 +815,8 @@ class BatchManager:
                             scraper.get_tweets_batch, 
                             tweet_ids=batch_ids_to_scrape, 
                             user_id=session.user_id, 
-                            rotation_index=batch_index
+                            rotation_index=batch_index,
+                            tweet_urls=id_to_url
                         )
                         
                         # Check if all accounts failed (Rate Limit or Auth Error)

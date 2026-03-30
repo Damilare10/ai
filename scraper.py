@@ -166,20 +166,70 @@ def get_tweet_text(tweet_id: str, user_id: int = None, tweet_url: str = None) ->
     return f"Error: All accounts exhausted/rate limited. Details: {error_summary}"
 
 
-def get_tweets_batch(tweet_ids: list[str], user_id: int = None, rotation_index: int = 0) -> dict[str, str]:
+def get_tweets_batch(tweet_ids: list[str], user_id: int = None, rotation_index: int = 0, tweet_urls: dict = None) -> dict[str, str]:
     """
     Batch-fetch tweets.
-    Uses TwitterAPI.io (vxtwitter batch endpoint unreliable for batch requests).
+    Primary: vxtwitter individual calls (reliable, free)
+    Fallback: TwitterAPI.io for any failures
     Returns: { "tweet_id": "@username | text", ... }
 
-    Special return values:
-    - {"_all_failed": True} = All accounts rate-limited/auth-failed
-    - {} = Tweets not found / empty
+    Args:
+        tweet_ids: List of tweet IDs to fetch
+        user_id: User ID for logging/credentials
+        rotation_index: For round-robin credential selection
+        tweet_urls: Optional dict mapping tweet_id -> full URL for vxtwitter calls
     """
+    results = {}
+    failed_ids = []
+    
+    # ----- Primary path: Try vxtwitter for each tweet individually -----
+    if tweet_ids:
+        logger.info(f"🔄 User {user_id}: Attempting vxtwitter for {len(tweet_ids)} tweets individually")
+        for tid in tweet_ids:
+            try:
+                # If we have the URL, use it; otherwise construct from ID
+                if tweet_urls and tid in tweet_urls:
+                    url = tweet_urls[tid]
+                    # Convert URL correctly without double-replacement
+                    if "x.com" in url:
+                        api_url = url.replace("x.com", "api.vxtwitter.com")
+                    elif "twitter.com" in url:
+                        api_url = url.replace("twitter.com", "api.vxtwitter.com")
+                    else:
+                        api_url = f"https://api.vxtwitter.com/status/{tid}"
+                else:
+                    # Fallback: try with just the ID (won't work, need username)
+                    api_url = f"https://api.vxtwitter.com/status/{tid}"
+                
+                response = requests.get(api_url, timeout=10)
+                if response.status_code == 200:
+                    data = response.json()
+                    if isinstance(data, dict) and not data.get('error'):
+                        text = data.get('text')
+                        username = data.get('user_screen_name')
+                        if text and username:
+                            results[tid] = f"@{username} | {text}"
+                            continue
+                
+                failed_ids.append(tid)
+            except Exception as e:
+                logger.warning(f"vxtwitter individual call failed for {tid}: {e}")
+                failed_ids.append(tid)
+        
+        if results:
+            logger.info(f"✅ vxtwitter batch: {len(results)}/{len(tweet_ids)} tweets fetched individually")
+        if not failed_ids:
+            return results  # All success via vxtwitter!
+    
+    # ----- Fallback: TwitterAPI.io for remaining failures -----
+    if not failed_ids:
+        failed_ids = tweet_ids
+    
+    logger.info(f"⚠️ Falling back to TwitterAPI.io for {len(failed_ids)} tweets")
     creds = utils.get_scraping_credentials(user_id)
     if not creds:
         logger.error("No scraping credentials found.")
-        return {}
+        return results  # Return what we got from vxtwitter at least
 
     # Round-robin credential selection
     cred_idx = rotation_index % len(creds)
@@ -198,11 +248,11 @@ def get_tweets_batch(tweet_ids: list[str], user_id: int = None, rotation_index: 
             continue
 
         key_hint = api_key[:6] + "..."
-        logger.info(f"🔄 User {user_id}: Batch ({len(tweet_ids)} tweets) via Account #{idx+1} (Key: {key_hint})")
+        logger.info(f"🔄 User {user_id}: Batch ({len(failed_ids)} tweets) via Account #{idx+1} (Key: {key_hint})")
 
         try:
             # TwitterAPI.io supports comma-separated IDs in a single request
-            ids_param = ",".join(tweet_ids)
+            ids_param = ",".join(failed_ids)
             response = requests.get(
                 f"{TWITTERAPI_BASE}/twitter/tweets",
                 headers={"X-API-Key": api_key},
@@ -231,16 +281,17 @@ def get_tweets_batch(tweet_ids: list[str], user_id: int = None, rotation_index: 
             tweets = data.get('tweets', [])
             if not tweets:
                 logger.warning(f"Empty batch response (Key: {key_hint})")
-                return {}
+                continue
 
-            results = {}
+            twitterapi_results = {}
             for tweet_obj in tweets:
                 tid = str(tweet_obj.get('id', ''))
                 text, username = _extract_from_tweet_obj(tweet_obj)
                 if tid and text:
-                    results[tid] = f"@{username} | {text}" if username else text
+                    twitterapi_results[tid] = f"@{username} | {text}" if username else text
 
-            logger.info(f"✅ Scraped {len(results)}/{len(tweet_ids)} tweets.")
+            logger.info(f"✅ Scraped {len(twitterapi_results)}/{len(failed_ids)} tweets via TwitterAPI.io.")
+            results.update(twitterapi_results)  # Merge with vxtwitter results
             return results  # Success, return immediately
 
         except requests.exceptions.Timeout:
@@ -254,6 +305,8 @@ def get_tweets_batch(tweet_ids: list[str], user_id: int = None, rotation_index: 
     total_failures = rate_limit_count + auth_error_count
     if total_failures >= total_attempts:
         logger.warning(f"🛑 ALL {total_attempts} accounts failed (Rate: {rate_limit_count}, Auth: {auth_error_count})")
+        if results:
+            return results  # Return what we got from vxtwitter
         return {"_all_failed": True}
 
-    return {}
+    return results  # Return merged results from vxtwitter + TwitterAPI.io
