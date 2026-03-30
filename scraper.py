@@ -28,14 +28,15 @@ def extract_tweet_for_ai(x_url: str) -> str:
         if response.status_code == 200:
             tweet_data = response.json()
 
-            # Extract exactly what the AI needs
+            # Extract from vxtwitter response structure
             tweet_text = tweet_data.get("text")
-            author_handle = tweet_data.get("author", {}).get("screen_name")
+            # vxtwitter uses user_screen_name at top level
+            author_handle = tweet_data.get("user_screen_name")
 
             if tweet_text and author_handle:
                 return f"@{author_handle} | {tweet_text}"
             else:
-                return "Error: Could not extract tweet data from vxtwitter response"
+                return f"Error: Could not extract tweet data (text={bool(tweet_text)}, author={bool(author_handle)})"
         else:
             return f"Error: vxtwitter API returned status {response.status_code}"
     except requests.exceptions.Timeout:
