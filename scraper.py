@@ -10,6 +10,35 @@ logger = logging.getLogger(__name__)
 # TwitterAPI.io base URL
 TWITTERAPI_BASE = "https://api.twitterapi.io"
 
+def extract_tweet_for_ai(x_url: str) -> str:
+    """
+    Extract tweet data using vxtwitter API (no auth required).
+    Primary method for tweet extraction.
+    """
+    # Convert the URL
+    api_url = x_url.replace("x.com", "api.vxtwitter.com").replace("twitter.com", "api.vxtwitter.com")
+
+    try:
+        response = requests.get(api_url, timeout=10)
+        if response.status_code == 200:
+            tweet_data = response.json()
+
+            # Extract exactly what the AI needs
+            tweet_text = tweet_data.get("text")
+            author_handle = tweet_data.get("author", {}).get("screen_name")
+
+            if tweet_text and author_handle:
+                return f"@{author_handle} | {tweet_text}"
+            else:
+                return "Error: Could not extract tweet data from vxtwitter response"
+        else:
+            return f"Error: vxtwitter API returned status {response.status_code}"
+    except requests.exceptions.Timeout:
+        return "Error: vxtwitter API request timed out"
+    except Exception as e:
+        return f"Error: vxtwitter request failed: {e}"
+
+
 def _extract_from_tweet_obj(tweet_obj: dict):
     """
     Extract (text, username) from a TwitterAPI.io tweet object.
@@ -23,9 +52,21 @@ def _extract_from_tweet_obj(tweet_obj: dict):
 
 def get_tweet_text(tweet_id: str, user_id: int = None, tweet_url: str = None) -> str:
     """
-    Fetch a single tweet's text via TwitterAPI.io.
-    Tries all available credentials in shuffled order for load balancing.
+    Fetch a single tweet's text.
+    Primary method: vxtwitter API (if tweet_url provided)
+    Fallback: TwitterAPI.io with credentials
     """
+    # Try vxtwitter first if tweet_url is provided
+    if tweet_url:
+        logger.info(f"🔄 User {user_id}: Trying vxtwitter for tweet {tweet_id}")
+        result = extract_tweet_for_ai(tweet_url)
+        if not result.startswith("Error:"):
+            logger.info(f"✅ Successfully fetched tweet {tweet_id} via vxtwitter")
+            return result
+        else:
+            logger.warning(f"⚠️ vxtwitter failed for tweet {tweet_id}: {result}. Falling back to TwitterAPI.io")
+
+    # Fallback to TwitterAPI.io
     creds = utils.get_scraping_credentials(user_id)
 
     if not creds:
