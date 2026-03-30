@@ -46,12 +46,25 @@ def extract_tweet_for_ai(x_url: str) -> str:
 
 def _extract_from_tweet_obj(tweet_obj: dict):
     """
-    Extract (text, username) from a TwitterAPI.io tweet object.
-    Response schema: { id, text, author: { userName, ... }, ... }
+    Extract (text, username) from tweet object from either vxtwitter or TwitterAPI.io.
+    Supports both shapes:
+    - TwitterAPI.io: { text, author: { userName, username, ... }, ... }
+    - vxtwitter:   { text, author: { screen_name, username, ... }, ... }
     """
-    text = tweet_obj.get('text', '')
-    author = tweet_obj.get('author') or {}
-    username = author.get('userName') or author.get('username') or ''
+    text = tweet_obj.get('text') or tweet_obj.get('full_text') or ''
+
+    author = tweet_obj.get('author') or tweet_obj.get('user') or {}
+    if isinstance(author, dict):
+        username = (
+            author.get('screen_name')
+            or author.get('userName')
+            or author.get('username')
+            or author.get('name')
+            or ''
+        )
+    else:
+        username = ''
+
     return text, username
 
 
@@ -154,13 +167,48 @@ def get_tweet_text(tweet_id: str, user_id: int = None, tweet_url: str = None) ->
 
 def get_tweets_batch(tweet_ids: list[str], user_id: int = None, rotation_index: int = 0) -> dict[str, str]:
     """
-    Batch-fetch tweets via TwitterAPI.io using a single request with comma-separated IDs.
+    Batch-fetch tweets.
+    Primary: vxtwitter (no auth, if available)
+    Fallback: TwitterAPI.io with credentials
     Returns: { "tweet_id": "@username | text", ... }
 
     Special return values:
     - {"_all_failed": True} = All accounts rate-limited/auth-failed
     - {} = Tweets not found / empty
     """
+    # ----- Primary path: vxtwitter batch -----
+    if tweet_ids:
+        vxtwitter_url = f"https://api.vxtwitter.com/tweets?ids={','.join(tweet_ids)}"
+        logger.info(f"🔄 User {user_id}: Trying vxtwitter batch for {len(tweet_ids)} tweets")
+        try:
+            response = requests.get(vxtwitter_url, timeout=20)
+            if response.status_code == 200:
+                data = response.json()
+                if isinstance(data, dict) and data.get('error'):
+                    logger.warning(f"vxtwitter batch returned error: {data.get('error')}")
+                else:
+                    tweets = data.get('tweets') or data.get('data') or data
+                    if isinstance(tweets, dict):
+                        tweets = [tweets]
+                    if isinstance(tweets, list) and tweets:
+                        results = {}
+                        for tweet_obj in tweets:
+                            tid = str(tweet_obj.get('id', ''))
+                            text, username = _extract_from_tweet_obj(tweet_obj)
+                            if tid and text:
+                                results[tid] = f"@{username} | {text}" if username else text
+
+                        if results:
+                            logger.info(f"✅ Successfully scraped batch via vxtwitter ({len(results)}/{len(tweet_ids)})")
+                            return results
+            else:
+                logger.warning(f"vxtwitter batch failed with status {response.status_code}")
+        except requests.exceptions.Timeout:
+            logger.warning("vxtwitter batch timeout")
+        except Exception as e:
+            logger.warning(f"vxtwitter batch request failed: {e}")
+
+    # ----- Fallback: TwitterAPI.io -----
     creds = utils.get_scraping_credentials(user_id)
     if not creds:
         logger.error("No scraping credentials found.")
