@@ -190,6 +190,9 @@ def get_tweets_batch(tweet_ids: list[str], user_id: int = None, rotation_index: 
                 # If we have the URL, use it; otherwise construct from ID
                 if tweet_urls and tid in tweet_urls:
                     url = tweet_urls[tid]
+                    # Ensure URL has https:// scheme
+                    if not url.startswith('http'):
+                        url = f'https://{url}'
                     # Convert URL correctly without double-replacement
                     if "x.com" in url:
                         api_url = url.replace("x.com", "api.vxtwitter.com")
