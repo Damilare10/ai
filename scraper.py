@@ -15,8 +15,13 @@ def extract_tweet_for_ai(x_url: str) -> str:
     Extract tweet data using vxtwitter API (no auth required).
     Primary method for tweet extraction.
     """
-    # Convert the URL
-    api_url = x_url.replace("x.com", "api.vxtwitter.com").replace("twitter.com", "api.vxtwitter.com")
+    # Convert the URL to vxtwitter API
+    if "x.com" in x_url:
+        api_url = x_url.replace("x.com", "api.vxtwitter.com")
+    elif "twitter.com" in x_url:
+        api_url = x_url.replace("twitter.com", "api.vxtwitter.com")
+    else:
+        return "Error: Invalid Twitter/X URL format"
 
     try:
         response = requests.get(api_url, timeout=10)
