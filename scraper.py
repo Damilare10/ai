@@ -185,39 +185,64 @@ def get_tweets_batch(tweet_ids: list[str], user_id: int = None, rotation_index: 
     # ----- Primary path: Try vxtwitter for each tweet individually -----
     if tweet_ids:
         logger.info(f"🔄 User {user_id}: Attempting vxtwitter for {len(tweet_ids)} tweets individually")
-        for tid in tweet_ids:
-            try:
-                # If we have the URL, use it; otherwise construct from ID
-                if tweet_urls and tid in tweet_urls:
-                    url = tweet_urls[tid]
-                    # Ensure URL has https:// scheme
-                    if not url.startswith('http'):
-                        url = f'https://{url}'
-                    # Convert URL correctly without double-replacement
-                    if "x.com" in url:
-                        api_url = url.replace("x.com", "api.vxtwitter.com")
-                    elif "twitter.com" in url:
-                        api_url = url.replace("twitter.com", "api.vxtwitter.com")
+        
+        # Process in smaller batches to avoid overwhelming the API
+        batch_size = 5  # Process 5 tweets at a time
+        vxtwitter_results = {}
+        
+        for i in range(0, len(tweet_ids), batch_size):
+            batch_ids = tweet_ids[i:i + batch_size]
+            logger.info(f"Processing vxtwitter batch {i//batch_size + 1}/{(len(tweet_ids) + batch_size - 1)//batch_size} ({len(batch_ids)} tweets)")
+            
+            for tid in batch_ids:
+                try:
+                    # If we have the URL, use it; otherwise construct from ID
+                    if tweet_urls and tid in tweet_urls:
+                        url = tweet_urls[tid]
+                        # Ensure URL has https:// scheme
+                        if not url.startswith('http'):
+                            url = f'https://{url}'
+                        # Convert URL correctly without double-replacement
+                        if "x.com" in url:
+                            api_url = url.replace("x.com", "api.vxtwitter.com")
+                        elif "twitter.com" in url:
+                            api_url = url.replace("twitter.com", "api.vxtwitter.com")
+                        else:
+                            api_url = f"https://api.vxtwitter.com/status/{tid}"
                     else:
+                        # Fallback: try with just the ID (won't work, need username)
                         api_url = f"https://api.vxtwitter.com/status/{tid}"
-                else:
-                    # Fallback: try with just the ID (won't work, need username)
-                    api_url = f"https://api.vxtwitter.com/status/{tid}"
+                    
+                    response = requests.get(api_url, timeout=10)
+                    if response.status_code == 200:
+                        data = response.json()
+                        if isinstance(data, dict) and not data.get('error'):
+                            text = data.get('text')
+                            username = data.get('user_screen_name')
+                            if text and username:
+                                vxtwitter_results[tid] = f"@{username} | {text}"
+                                continue
+                    
+                    failed_ids.append(tid)
+                except Exception as e:
+                    logger.warning(f"vxtwitter individual call failed for {tid}: {e}")
+                    failed_ids.append(tid)
                 
-                response = requests.get(api_url, timeout=10)
-                if response.status_code == 200:
-                    data = response.json()
-                    if isinstance(data, dict) and not data.get('error'):
-                        text = data.get('text')
-                        username = data.get('user_screen_name')
-                        if text and username:
-                            results[tid] = f"@{username} | {text}"
-                            continue
-                
-                failed_ids.append(tid)
-            except Exception as e:
-                logger.warning(f"vxtwitter individual call failed for {tid}: {e}")
-                failed_ids.append(tid)
+                # Small delay between requests to be respectful to the API
+                time.sleep(0.2)
+            
+            # Progress update for large batches
+            if len(tweet_ids) > 10:
+                success_count = len(vxtwitter_results)
+                logger.info(f"vxtwitter progress: {success_count}/{len(tweet_ids)} tweets fetched so far")
+        
+        # Merge vxtwitter results
+        results.update(vxtwitter_results)
+        
+        if vxtwitter_results:
+            logger.info(f"✅ vxtwitter batch: {len(vxtwitter_results)}/{len(tweet_ids)} tweets fetched individually")
+        if len(failed_ids) == len(tweet_ids):
+            logger.warning("All vxtwitter calls failed - falling back to TwitterAPI.io")
         
         if results:
             logger.info(f"✅ vxtwitter batch: {len(results)}/{len(tweet_ids)} tweets fetched individually")
